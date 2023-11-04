@@ -442,20 +442,21 @@ struct Node {
     parent: Option<Parent>,
 }
 
-fn _reconstruct_plan(nodes: &HashMap<HomeState, Node>, terminal_state: &HomeState) -> Vec<HomeAction> {
+fn _reconstruct_solution(nodes: &HashMap<HomeState, Node>, terminal_state: &HomeState) -> Option<(Vec<HomeAction>, f64)> {
     let mut plan_back = vec![];
     let mut state = terminal_state;
     while nodes.contains_key(&state) {
-        let optional_parent = &nodes.get(&state).unwrap().parent;
-        if optional_parent.is_none() {  // initial state
-            return plan_back.into_iter().rev().collect();
+        let node = nodes.get(&state).unwrap();
+        let optional_parent = &node.parent;
+        if optional_parent.is_none() {  // reached initial state
+            return Some((plan_back.into_iter().rev().collect(), node.path_cost));
         }
         let parent = optional_parent.as_ref().unwrap();
         state = &parent.state;
         let action = &parent.action;
         plan_back.push(action.clone());
     }
-    return vec![];
+    return None;
 }
 
 fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(Vec<HomeAction>, f64)> {
@@ -510,9 +511,11 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
                 let elapsed_time = start_time.elapsed();
                 println!("max depth: {:?}, states visited: {:?}, total time: {:?}", max_depth, max_states_visited, elapsed_time);
             }
-            let plan = _reconstruct_plan(&nodes, &selected_state);
-            let cost = nodes.get(&selected_state).unwrap().path_cost;
-            return Some((plan, cost));
+            let solution = _reconstruct_solution(&nodes, &selected_state);
+            if solution.is_none() {
+                println!("error in reconstructing solution")
+            }
+            return solution;
         }
 
         for action in planning_problem.applicable_actions(&selected_state) {
