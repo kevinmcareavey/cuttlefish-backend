@@ -430,22 +430,32 @@ impl Ord for MyF64 {
     }
 }
 
+struct Parent {
+    state: HomeState,
+    action: HomeAction,
+}
+
 struct Node {
     path_cost: f64,
     evaluation: f64,
     depth: u32,
+    parent: Option<Parent>,
 }
 
-fn _reconstruct_plan(has_parent: &HashMap<HomeState, (HomeState, HomeAction)>, terminal_state: &HomeState) -> Vec<HomeAction> {
+fn _reconstruct_plan(nodes: &HashMap<HomeState, Node>, terminal_state: &HomeState) -> Vec<HomeAction> {
     let mut plan_back = vec![];
     let mut state = terminal_state;
-    while has_parent.contains_key(&state) {
-        let parent = has_parent.get(&state).unwrap();
-        state = &parent.0;
-        let action = &parent.1;
+    while nodes.contains_key(&state) {
+        let optional_parent = &nodes.get(&state).unwrap().parent;
+        if optional_parent.is_none() {  // initial state
+            return plan_back.into_iter().rev().collect();
+        }
+        let parent = optional_parent.as_ref().unwrap();
+        state = &parent.state;
+        let action = &parent.action;
         plan_back.push(action.clone());
     }
-    return plan_back.into_iter().rev().collect();
+    return vec![];
 }
 
 fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(Vec<HomeAction>, f64)> {
@@ -458,6 +468,7 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
         path_cost: 0.0,
         evaluation: planning_problem.heuristic_function(&initial_state),
         depth: 0,
+        parent: None,
     });
 
     let mut insertion_index: u32 = 0;
@@ -468,15 +479,13 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
     frontier_items.insert(initial_state.clone());
     insertion_index += 1;
 
-    let mut has_parent: HashMap<HomeState, (HomeState, HomeAction)> = HashMap::new();
-
     let mut max_depth: u32 = 0;
     let mut max_states_visited: u32 = 0;
     let mut previous_max_depth: u32 = 0;
     let mut previous_max_states_visited: u32 = 0;
 
     while !frontier.is_empty() {
-        let selected_state = frontier.pop().unwrap().0.1;
+        let selected_state = frontier.pop().unwrap().0.1;  // tuple = ((insertion_index, state), priority)
         frontier_items.remove(&selected_state);
 
         if verbose {
@@ -484,7 +493,7 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
             if current_depth > max_depth {
                 max_depth = current_depth;
             }
-            let states_visited = has_parent.len() as u32 + 1;
+            let states_visited = nodes.len() as u32;
             if states_visited > max_states_visited {
                 max_states_visited = states_visited;
             }
@@ -501,7 +510,7 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
                 let elapsed_time = start_time.elapsed();
                 println!("max depth: {:?}, states visited: {:?}, total time: {:?}", max_depth, max_states_visited, elapsed_time);
             }
-            let plan = _reconstruct_plan(&has_parent, &selected_state);
+            let plan = _reconstruct_plan(&nodes, &selected_state);
             let cost = nodes.get(&selected_state).unwrap().path_cost;
             return Some((plan, cost));
         }
@@ -512,11 +521,11 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
             let old_path_cost_successor_state = if successor_node.is_some() { successor_node.unwrap().path_cost } else { f64::INFINITY };
             let new_path_cost_successor_state = nodes.get(&selected_state).unwrap().path_cost + planning_problem.cost_function(&selected_state, &action, &successor_state);
             if new_path_cost_successor_state < old_path_cost_successor_state {
-                has_parent.insert(successor_state.clone(), (selected_state.clone(), action.clone()));
                 nodes.insert(successor_state.clone(), Node {
                     path_cost: new_path_cost_successor_state,
                     evaluation: new_path_cost_successor_state + planning_problem.heuristic_function(&successor_state),
                     depth: nodes.get(&selected_state).unwrap().depth + 1,
+                    parent: Some(Parent { state: selected_state.clone(), action: action.clone() }),
                 });
                 if !frontier_items.contains(&successor_state) {
                     frontier.push((insertion_index, successor_state.clone()), Reverse(MyF64(nodes.get(&successor_state).unwrap().evaluation)));
