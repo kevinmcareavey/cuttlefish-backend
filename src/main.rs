@@ -413,6 +413,7 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
     }
 }
 
+// https://github.com/garro95/priority-queue/issues/27#issuecomment-743745069
 #[derive(PartialOrd, PartialEq)]
 pub struct MyF64(f64);
 
@@ -427,6 +428,12 @@ impl Ord for MyF64 {
             Ordering::Less
         }
     }
+}
+
+struct Node {
+    path_cost: f64,
+    evaluation: f64,
+    depth: u32,
 }
 
 fn _reconstruct_plan(has_parent: &HashMap<HomeState, (HomeState, HomeAction)>, terminal_state: &HomeState) -> Vec<HomeAction> {
@@ -446,19 +453,17 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
 
     let initial_state: HomeState = planning_problem.initial_state();
 
-    let mut path_cost: HashMap<HomeState, f64> = HashMap::new();
-    path_cost.insert(initial_state.clone(), 0.0);
-
-    let mut evaluation = HashMap::new();
-    evaluation.insert(initial_state.clone(), path_cost.get(&initial_state).unwrap() + planning_problem.heuristic_function(&initial_state));
-
-    let mut depth: HashMap<HomeState, u32> = HashMap::new();
-    depth.insert(initial_state.clone(), 0);
+    let mut nodes: HashMap<HomeState, Node> = HashMap::new();
+    nodes.insert(initial_state.clone(), Node {
+        path_cost: 0.0,
+        evaluation: planning_problem.heuristic_function(&initial_state),
+        depth: 0,
+    });
 
     let mut insertion_index: u32 = 0;
 
     let mut frontier: PriorityQueue<(u32, HomeState), Reverse<MyF64>> = PriorityQueue::new();
-    frontier.push((insertion_index, initial_state.clone()), Reverse(MyF64(*evaluation.get(&initial_state).unwrap())));
+    frontier.push((insertion_index, initial_state.clone()), Reverse(MyF64(nodes.get(&initial_state).unwrap().evaluation)));
     let mut frontier_items = HashSet::new();
     frontier_items.insert(initial_state.clone());
     insertion_index += 1;
@@ -475,7 +480,7 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
         frontier_items.remove(&selected_state);
 
         if verbose {
-            let current_depth = *depth.get(&selected_state).unwrap();
+            let current_depth = nodes.get(&selected_state).unwrap().depth;
             if current_depth > max_depth {
                 max_depth = current_depth;
             }
@@ -497,21 +502,24 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
                 println!("max depth: {:?}, states visited: {:?}, total time: {:?}", max_depth, max_states_visited, elapsed_time);
             }
             let plan = _reconstruct_plan(&has_parent, &selected_state);
-            let cost = *path_cost.get(&selected_state).unwrap_or(&f64::INFINITY);
+            let cost = nodes.get(&selected_state).unwrap().path_cost;
             return Some((plan, cost));
         }
 
         for action in planning_problem.applicable_actions(&selected_state) {
             let successor_state: HomeState = planning_problem.transition_function(&selected_state, &action);
-            let old_path_cost_successor_state = *path_cost.get(&successor_state).unwrap_or(&f64::INFINITY);
-            let new_path_cost_successor_state = path_cost.get(&selected_state).unwrap() + planning_problem.cost_function(&selected_state, &action, &successor_state);
+            let successor_node = nodes.get(&successor_state);
+            let old_path_cost_successor_state = if successor_node.is_some() { successor_node.unwrap().path_cost } else { f64::INFINITY };
+            let new_path_cost_successor_state = nodes.get(&selected_state).unwrap().path_cost + planning_problem.cost_function(&selected_state, &action, &successor_state);
             if new_path_cost_successor_state < old_path_cost_successor_state {
                 has_parent.insert(successor_state.clone(), (selected_state.clone(), action.clone()));
-                path_cost.insert(successor_state.clone(), new_path_cost_successor_state);
-                evaluation.insert(successor_state.clone(), new_path_cost_successor_state + planning_problem.heuristic_function(&successor_state));
-                depth.insert(successor_state.clone(), depth.get(&selected_state).unwrap() + 1);
+                nodes.insert(successor_state.clone(), Node {
+                    path_cost: new_path_cost_successor_state,
+                    evaluation: new_path_cost_successor_state + planning_problem.heuristic_function(&successor_state),
+                    depth: nodes.get(&selected_state).unwrap().depth + 1,
+                });
                 if !frontier_items.contains(&successor_state) {
-                    frontier.push((insertion_index, successor_state.clone()), Reverse(MyF64(*evaluation.get(&successor_state).unwrap())));
+                    frontier.push((insertion_index, successor_state.clone()), Reverse(MyF64(nodes.get(&successor_state).unwrap().evaluation)));
                     frontier_items.insert(successor_state.clone());
                     insertion_index += 1;
                 }
@@ -526,7 +534,7 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
     return None;
 }
 
-fn _home_problem_base(timesteps_per_hour: u32, import_prices: Vec<f64>, export_prices: Vec<f64>) -> HomeProblem {
+fn _home_problem_base(timesteps_per_hour: u32) -> HomeProblem {
     let timesteps_per_hour_f64 = timesteps_per_hour as f64;
     return HomeProblem::new(
         HomeParameters {
@@ -542,16 +550,16 @@ fn _home_problem_base(timesteps_per_hour: u32, import_prices: Vec<f64>, export_p
     )
 }
 
-fn home_problem_1h(import_prices: Vec<f64>, export_prices: Vec<f64>) -> HomeProblem {
-    return _home_problem_base(1, import_prices, export_prices);
+fn home_problem_1h() -> HomeProblem {
+    return _home_problem_base(1);
 }
 
-fn home_problem_30m(import_prices: Vec<f64>, export_prices: Vec<f64>) -> HomeProblem {
-    return _home_problem_base(2, import_prices, export_prices);
+fn home_problem_30m() -> HomeProblem {
+    return _home_problem_base(2);
 }
 
-fn home_problem_15m(import_prices: Vec<f64>, export_prices: Vec<f64>) -> HomeProblem {
-    return _home_problem_base(4, import_prices, export_prices);
+fn home_problem_15m() -> HomeProblem {
+    return _home_problem_base(4);
 }
 
 fn main() {
@@ -585,5 +593,4 @@ fn main() {
     } else {
         println!("no solution found");
     }
-
 }
