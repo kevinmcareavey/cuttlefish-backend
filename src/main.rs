@@ -4,7 +4,7 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::time::Instant;
-use itertools::{izip};
+use itertools::{Itertools, izip};
 use priority_queue::PriorityQueue;
 
 #[derive(Debug)]
@@ -149,56 +149,14 @@ impl HomeProblem {
             min_required_timesteps.push(appliance_parameters.min_required_cycles * appliance_parameters.duration);
         }
 
-        let available_actions = vec![
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::DISCHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::OFF, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF, ApplianceAction::ON] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::OFF] },
-            HomeAction { battery: BatteryAction::CHARGE, appliances: vec![ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON, ApplianceAction::ON] },
-        ];
+        let battery_actions = vec![BatteryAction::DISCHARGE, BatteryAction::OFF, BatteryAction::CHARGE];
+        let appliance_actions = vec![ApplianceAction::OFF, ApplianceAction::ON];
+        let mut available_actions = vec![];
+        for battery_action in battery_actions {
+            for appliance_action_tuple in (0..home_parameters.appliances.len()).map(|_| &appliance_actions).multi_cartesian_product() {
+                available_actions.push(HomeAction { battery: battery_action.clone(), appliances: appliance_action_tuple.into_iter().cloned().collect() });
+            }
+        }
 
         return Self { home_parameters, import_prices, export_prices, min_real_cost, min_required_timesteps, available_actions }
     }
@@ -598,7 +556,11 @@ fn main() {
     if solution.is_some() {
         let (plan, cost) = solution.unwrap();
         for action in &plan {
-            println!("{:?} {:?} {:?} {:?} {:?}", action.battery, action.appliances[0], action.appliances[1], action.appliances[2], action.appliances[3]);
+            print!("{:?}", action.battery);
+            for appliance_action in &action.appliances {
+                print!(" {:?}", appliance_action);
+            }
+            println!();
         }
         let min_real_cost: f64 = home_problem.min_real_cost.iter().sum();
         let real_cost = home_problem.real_cost(&plan);
