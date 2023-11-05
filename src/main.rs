@@ -405,10 +405,9 @@ fn _reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State,
     let mut plan_back = vec![];
     let mut state = terminal_state;
     while nodes.contains_key(&state) {
-        let node = nodes.get(&state).unwrap();
-        let optional_parent = &node.parent;
+        let optional_parent = &nodes.get(&state).unwrap().parent;
         if optional_parent.is_none() {  // reached initial state
-            return Some((plan_back.into_iter().rev().collect(), node.path_cost));
+            return Some((plan_back.into_iter().rev().collect(), nodes.get(&terminal_state).unwrap().path_cost));
         }
         let parent = optional_parent.as_ref().unwrap();
         state = &parent.state;
