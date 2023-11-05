@@ -153,8 +153,12 @@ impl HomeProblem {
         let appliance_actions = vec![ApplianceAction::OFF, ApplianceAction::ON];
         let mut available_actions = vec![];
         for battery_action in battery_actions {
-            for appliance_action_tuple in (0..home_parameters.appliances.len()).map(|_| &appliance_actions).multi_cartesian_product() {
-                available_actions.push(HomeAction { battery: battery_action.clone(), appliances: appliance_action_tuple.into_iter().cloned().collect() });
+            if home_parameters.appliances.len() == 0 {
+                available_actions.push(HomeAction { battery: battery_action.clone(), appliances: vec![] });
+            } else {
+                for appliance_action_tuple in (0..home_parameters.appliances.len()).map(|_| &appliance_actions).multi_cartesian_product() {
+                    available_actions.push(HomeAction { battery: battery_action.clone(), appliances: appliance_action_tuple.into_iter().cloned().collect() });
+                }
             }
         }
 
