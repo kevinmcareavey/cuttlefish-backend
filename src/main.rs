@@ -2,6 +2,7 @@ mod data;
 
 use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::time::Instant;
 use itertools::{izip};
 use priority_queue::PriorityQueue;
@@ -430,19 +431,19 @@ impl Ord for MyF64 {
     }
 }
 
-struct Parent {
-    state: HomeState,
-    action: HomeAction,
+struct Parent<State, Action> {
+    state: State,
+    action: Action,
 }
 
-struct Node {
+struct Node<State, Action> {
     path_cost: f64,
     evaluation: f64,
     depth: u32,
-    parent: Option<Parent>,
+    parent: Option<Parent<State, Action>>,
 }
 
-fn _reconstruct_solution(nodes: &HashMap<HomeState, Node>, terminal_state: &HomeState) -> Option<(Vec<HomeAction>, f64)> {
+fn _reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State, Node<State, Action>>, terminal_state: &State) -> Option<(Vec<Action>, f64)> {
     let mut plan_back = vec![];
     let mut state = terminal_state;
     while nodes.contains_key(&state) {
@@ -459,12 +460,12 @@ fn _reconstruct_solution(nodes: &HashMap<HomeState, Node>, terminal_state: &Home
     return None;
 }
 
-fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(Vec<HomeAction>, f64)> {
+fn _best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, verbose: bool) -> Option<(Vec<Action>, f64)> {
     let start_time = Instant::now();
 
-    let initial_state: HomeState = planning_problem.initial_state();
+    let initial_state: State = planning_problem.initial_state();
 
-    let mut nodes: HashMap<HomeState, Node> = HashMap::new();
+    let mut nodes: HashMap<State, Node<State, Action>> = HashMap::new();
     nodes.insert(initial_state.clone(), Node {
         path_cost: 0.0,
         evaluation: planning_problem.heuristic_function(&initial_state),
@@ -474,7 +475,7 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
 
     let mut insertion_index: u32 = 0;
 
-    let mut frontier: PriorityQueue<(u32, HomeState), Reverse<MyF64>> = PriorityQueue::new();
+    let mut frontier: PriorityQueue<(u32, State), Reverse<MyF64>> = PriorityQueue::new();
     frontier.push((insertion_index, initial_state.clone()), Reverse(MyF64(nodes.get(&initial_state).unwrap().evaluation)));
     let mut frontier_items = HashSet::new();
     frontier_items.insert(initial_state.clone());
@@ -519,7 +520,7 @@ fn _best_first_search(planning_problem: &HomeProblem, verbose: bool) -> Option<(
         }
 
         for action in planning_problem.applicable_actions(&selected_state) {
-            let successor_state: HomeState = planning_problem.transition_function(&selected_state, &action);
+            let successor_state: State = planning_problem.transition_function(&selected_state, &action);
             let successor_node = nodes.get(&successor_state);
             let old_path_cost_successor_state = if successor_node.is_some() { successor_node.unwrap().path_cost } else { f64::INFINITY };
             let new_path_cost_successor_state = nodes.get(&selected_state).unwrap().path_cost + planning_problem.cost_function(&selected_state, &action, &successor_state);
