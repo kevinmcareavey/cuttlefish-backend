@@ -106,7 +106,6 @@ struct HomeParameters {
 
 trait PlanningProblem<State, Action> {
     fn initial_state(&self) -> State;
-    fn is_applicable(&self, state: &HomeState, action: &HomeAction) -> bool;
     fn applicable_actions(&self, state: &State) -> Vec<&Action>;
     fn transition_function(&self, state: &State, action: &Action) -> State;
     fn cost_function(&self, state: &State, action: &Action, successor_state: &State) -> f64;
@@ -152,10 +151,12 @@ impl HomeProblem {
         let battery_actions = vec![BatteryAction::DISCHARGE, BatteryAction::OFF, BatteryAction::CHARGE];
         let appliance_actions = vec![ApplianceAction::OFF, ApplianceAction::ON];
         let mut available_actions = vec![];
-        for battery_action in battery_actions {
-            if home_parameters.appliances.len() == 0 {
+        if home_parameters.appliances.is_empty() {
+            for battery_action in battery_actions {
                 available_actions.push(HomeAction { battery: battery_action.clone(), appliances: vec![] });
-            } else {
+            }
+        } else {
+            for battery_action in battery_actions {
                 for appliance_action_tuple in (0..home_parameters.appliances.len()).map(|_| &appliance_actions).multi_cartesian_product() {
                     available_actions.push(HomeAction { battery: battery_action.clone(), appliances: appliance_action_tuple.into_iter().cloned().collect() });
                 }
@@ -163,6 +164,24 @@ impl HomeProblem {
         }
 
         return Self { home_parameters, import_prices, export_prices, min_real_cost, min_required_timesteps, available_actions }
+    }
+
+    fn is_applicable(&self, state: &HomeState, action: &HomeAction) -> bool {
+        if state.battery.level <= 0 && action.battery == BatteryAction::DISCHARGE {
+            return false;
+        }
+        if state.battery.level >= self.home_parameters.battery.capacity && action.battery == BatteryAction::CHARGE {
+            return false;
+        }
+        for (appliance_parameters, appliance_state, appliance_action) in izip!(&self.home_parameters.appliances, &state.appliances, &action.appliances) {
+            if appliance_state.active_cycle > 0 && *appliance_action == ApplianceAction::OFF {
+                return false;
+            }
+            if state.timestep + appliance_parameters.duration - appliance_state.active_cycle - 1 >= self.home_parameters.horizon && *appliance_action == ApplianceAction::ON {
+                return false;
+            }
+        }
+        return true;
     }
 
     fn real_cost(&self, plan: &Vec<HomeAction>) -> f64 {
@@ -201,24 +220,6 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
             battery: BatteryState { level: self.home_parameters.battery.initial_level },
             appliances: appliance_states,
         };
-    }
-
-    fn is_applicable(&self, state: &HomeState, action: &HomeAction) -> bool {
-        if state.battery.level <= 0 && action.battery == BatteryAction::DISCHARGE {
-            return false;
-        }
-        if state.battery.level >= self.home_parameters.battery.capacity && action.battery == BatteryAction::CHARGE {
-            return false;
-        }
-        for (appliance_parameters, appliance_state, appliance_action) in izip!(&self.home_parameters.appliances, &state.appliances, &action.appliances) {
-            if appliance_state.active_cycle > 0 && *appliance_action == ApplianceAction::OFF {
-                return false;
-            }
-            if state.timestep + appliance_parameters.duration - appliance_state.active_cycle - 1 >= self.home_parameters.horizon && *appliance_action == ApplianceAction::ON {
-                return false;
-            }
-        }
-        return true;
     }
 
     fn applicable_actions(&self, state: &HomeState) -> Vec<&HomeAction> {
