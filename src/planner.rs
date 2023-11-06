@@ -122,14 +122,15 @@ fn best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: 
             let old_path_cost_successor_state = if successor_node.is_some() { successor_node.unwrap().path_cost } else { f64::INFINITY };
             let new_path_cost_successor_state = nodes.get(&selected_state).unwrap().path_cost + planning_problem.cost_function(&selected_state, &action, &successor_state);
             if new_path_cost_successor_state < old_path_cost_successor_state {
+                let evaluation_successor_state = evaluation_function(new_path_cost_successor_state, &successor_state);
                 nodes.insert(successor_state.clone(), Node {
                     path_cost: new_path_cost_successor_state,
-                    evaluation: evaluation_function(new_path_cost_successor_state, &successor_state),
+                    evaluation: evaluation_successor_state,
                     depth: nodes.get(&selected_state).unwrap().depth + 1,
                     parent: Some(Parent { state: selected_state.clone(), action: action.clone() }),
                 });
                 if !frontier_items.contains(&successor_state) {
-                    frontier.push((insertion_index, successor_state.clone()), Reverse(MyF64(nodes.get(&successor_state).unwrap().evaluation)));
+                    frontier.push((insertion_index, successor_state.clone()), Reverse(MyF64(evaluation_successor_state)));
                     frontier_items.insert(successor_state.clone());
                     insertion_index += 1;
                 }
