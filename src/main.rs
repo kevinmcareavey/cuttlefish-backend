@@ -110,7 +110,6 @@ trait PlanningProblem<State, Action> {
     fn transition_function(&self, state: &State, action: &Action) -> State;
     fn cost_function(&self, state: &State, action: &Action, successor_state: &State) -> f64;
     fn is_goal(&self, state: &State) -> bool;
-    fn heuristic_function(&self, state: &State) -> f64;
 }
 
 struct HomeProblem {
@@ -182,6 +181,86 @@ impl HomeProblem {
             }
         }
         return true;
+    }
+
+    fn heuristic_function(&self, state: &HomeState) -> f64 {
+        let timesteps_to_horizon = self.home_parameters.horizon - state.timestep;
+
+        if state.battery.level + timesteps_to_horizon < self.home_parameters.battery.min_required_level {
+            return f64::INFINITY;
+        }
+
+        for (appliance_parameters, appliance_state, appliance_min_required_timesteps) in izip!(&self.home_parameters.appliances, &state.appliances, &self.min_required_timesteps) {
+            let appliance_timesteps_completed = (appliance_state.completed_cycles * appliance_parameters.duration) + appliance_state.active_cycle;
+
+            if appliance_timesteps_completed > *appliance_min_required_timesteps {
+                return f64::INFINITY;
+            }
+
+            let appliance_timesteps_to_go = appliance_min_required_timesteps - appliance_timesteps_completed;
+
+            if appliance_timesteps_to_go > timesteps_to_horizon {
+                return f64::INFINITY;
+            }
+        }
+
+        if timesteps_to_horizon == 0 {
+            return 0.0;
+        }
+
+        let mut future_expense_lower_bound = 0.0;
+
+        let mut appliance_active_cycle_energy = vec![];
+        for (appliance_parameters, appliance_state) in izip!(&self.home_parameters.appliances, &state.appliances) {
+            let mut x = vec![];
+            if appliance_state.active_cycle > 0 {
+                for _ in 0..appliance_parameters.duration - appliance_state.active_cycle {
+                    x.push(appliance_parameters.rate);
+                }
+            }
+            appliance_active_cycle_energy.push(x);
+        }
+
+        let mut active_cycles_energy = vec![];
+        let mut lengths = vec![];
+        let mut longest = 0;
+        for appliance in &appliance_active_cycle_energy {
+            let appliance_len = appliance.len() as u32;
+            lengths.push(appliance_len);
+            if appliance_len > longest {
+                longest = appliance_len;
+            }
+        }
+        for i in 0..longest {
+            let index = usize::try_from(i).unwrap();
+            let mut value = 0.0;
+            for (appliance, appliance_length) in  izip!(&appliance_active_cycle_energy, &lengths) {
+                if *appliance_length > i {
+                    value += appliance[index];
+                }
+            }
+            active_cycles_energy.push(value);
+        }
+
+        let timestep = usize::try_from(state.timestep).unwrap();
+        for (timestep_offset, (import_price, export_price, off_energy)) in izip!(&self.import_prices[timestep..], &self.export_prices[timestep..], active_cycles_energy).enumerate() {
+            let discharge_energy = off_energy - self.home_parameters.battery.rate;
+            let charge_energy = off_energy + self.home_parameters.battery.rate;
+            let options = vec![
+                if discharge_energy >= 0.0 { discharge_energy * import_price } else { discharge_energy * export_price },
+                if off_energy >= 0.0 { off_energy * import_price } else { off_energy * export_price },
+                if charge_energy >= 0.0 { charge_energy * import_price } else { charge_energy * export_price },
+            ];
+            let mut min_option = f64::INFINITY;
+            for option in options {
+                if option < min_option {
+                    min_option = option;
+                }
+            }
+            future_expense_lower_bound += min_option - self.min_real_cost[timestep + timestep_offset];
+        }
+
+        return future_expense_lower_bound;
     }
 
     fn real_cost(&self, plan: &Vec<HomeAction>) -> f64 {
@@ -295,86 +374,6 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
         }
         return true;
     }
-
-    fn heuristic_function(&self, state: &HomeState) -> f64 {
-        let timesteps_to_horizon = self.home_parameters.horizon - state.timestep;
-
-        if state.battery.level + timesteps_to_horizon < self.home_parameters.battery.min_required_level {
-            return f64::INFINITY;
-        }
-
-        for (appliance_parameters, appliance_state, appliance_min_required_timesteps) in izip!(&self.home_parameters.appliances, &state.appliances, &self.min_required_timesteps) {
-            let appliance_timesteps_completed = (appliance_state.completed_cycles * appliance_parameters.duration) + appliance_state.active_cycle;
-
-            if appliance_timesteps_completed > *appliance_min_required_timesteps {
-                return f64::INFINITY;
-            }
-
-            let appliance_timesteps_to_go = appliance_min_required_timesteps - appliance_timesteps_completed;
-
-            if appliance_timesteps_to_go > timesteps_to_horizon {
-                return f64::INFINITY;
-            }
-        }
-
-        if timesteps_to_horizon == 0 {
-            return 0.0;
-        }
-
-        let mut future_expense_lower_bound = 0.0;
-
-        let mut appliance_active_cycle_energy = vec![];
-        for (appliance_parameters, appliance_state) in izip!(&self.home_parameters.appliances, &state.appliances) {
-            let mut x = vec![];
-            if appliance_state.active_cycle > 0 {
-                for _ in 0..appliance_parameters.duration - appliance_state.active_cycle {
-                    x.push(appliance_parameters.rate);
-                }
-            }
-            appliance_active_cycle_energy.push(x);
-        }
-
-        let mut active_cycles_energy = vec![];
-        let mut lengths = vec![];
-        let mut longest = 0;
-        for appliance in &appliance_active_cycle_energy {
-            let appliance_len = appliance.len() as u32;
-            lengths.push(appliance_len);
-            if appliance_len > longest {
-                longest = appliance_len;
-            }
-        }
-        for i in 0..longest {
-            let index = usize::try_from(i).unwrap();
-            let mut value = 0.0;
-            for (appliance, appliance_length) in  izip!(&appliance_active_cycle_energy, &lengths) {
-                if *appliance_length > i {
-                    value += appliance[index];
-                }
-            }
-            active_cycles_energy.push(value);
-        }
-
-        let timestep = usize::try_from(state.timestep).unwrap();
-        for (timestep_offset, (import_price, export_price, off_energy)) in izip!(&self.import_prices[timestep..], &self.export_prices[timestep..], active_cycles_energy).enumerate() {
-            let discharge_energy = off_energy - self.home_parameters.battery.rate;
-            let charge_energy = off_energy + self.home_parameters.battery.rate;
-            let options = vec![
-                if discharge_energy >= 0.0 { discharge_energy * import_price } else { discharge_energy * export_price },
-                if off_energy >= 0.0 { off_energy * import_price } else { off_energy * export_price },
-                if charge_energy >= 0.0 { charge_energy * import_price } else { charge_energy * export_price },
-            ];
-            let mut min_option = f64::INFINITY;
-            for option in options {
-                if option < min_option {
-                    min_option = option;
-                }
-            }
-            future_expense_lower_bound += min_option - self.min_real_cost[timestep + timestep_offset];
-        }
-
-        return future_expense_lower_bound;
-    }
 }
 
 // https://github.com/garro95/priority-queue/issues/27#issuecomment-743745069
@@ -422,7 +421,7 @@ fn _reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State,
     return None;
 }
 
-fn _best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, verbose: bool) -> Option<(Vec<Action>, f64)> {
+fn _best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, evaluation_function: impl Fn(f64, &State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
     let start_time = Instant::now();
 
     let initial_state: State = planning_problem.initial_state();
@@ -430,7 +429,7 @@ fn _best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem:
     let mut nodes: HashMap<State, Node<State, Action>> = HashMap::new();
     nodes.insert(initial_state.clone(), Node {
         path_cost: 0.0,
-        evaluation: planning_problem.heuristic_function(&initial_state),
+        evaluation: evaluation_function(0.0, &initial_state),
         depth: 0,
         parent: None,
     });
@@ -489,7 +488,7 @@ fn _best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem:
             if new_path_cost_successor_state < old_path_cost_successor_state {
                 nodes.insert(successor_state.clone(), Node {
                     path_cost: new_path_cost_successor_state,
-                    evaluation: new_path_cost_successor_state + planning_problem.heuristic_function(&successor_state),
+                    evaluation: evaluation_function(new_path_cost_successor_state, &successor_state),
                     depth: nodes.get(&selected_state).unwrap().depth + 1,
                     parent: Some(Parent { state: selected_state.clone(), action: action.clone() }),
                 });
@@ -507,6 +506,23 @@ fn _best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem:
         println!("max depth: {:?}, states visited: {:?}, total time: {:?}", max_depth, max_states_visited, elapsed_time);
     }
     return None;
+}
+
+fn uniform_cost_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, verbose: bool) -> Option<(Vec<Action>, f64)> {
+    return _best_first_search(planning_problem, |path_cost, _| path_cost, verbose);
+}
+
+fn greedy_best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
+    return _best_first_search(planning_problem, |_, state| heuristic_function(state), verbose);
+}
+
+fn astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
+    return _best_first_search(planning_problem, |path_cost, state| path_cost + heuristic_function(state), verbose);
+}
+
+fn weighted_astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, weight: f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
+    assert!(weight > 1.0);
+    return _best_first_search(planning_problem, |path_cost, state| path_cost + weight * heuristic_function(state), verbose);
 }
 
 fn _home_problem_base(timesteps_per_hour: u32) -> HomeProblem {
@@ -556,7 +572,10 @@ fn main() {
         }
     );
 
-    let solution = _best_first_search(&home_problem, true);
+    // let solution = uniform_cost_search(&home_problem, true);
+    // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
+    let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
+    // let solution = weighted_astar(&home_problem, |state| home_problem.heuristic_function(state), 2.0, true);
     if solution.is_some() {
         let (plan, cost) = solution.unwrap();
         for action in &plan {
