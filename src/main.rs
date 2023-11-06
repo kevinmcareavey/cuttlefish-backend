@@ -6,22 +6,14 @@ use itertools::{Itertools, izip};
 
 #[derive(Debug)]
 #[derive(Clone)]
-#[derive(Hash)]
-#[derive(Eq)]
-#[derive(PartialEq)]
-#[derive(Ord)]
-#[derive(PartialOrd)]
+#[derive(Hash, Eq, PartialEq)]
 struct BatteryState {
     level: u32,
 }
 
 #[derive(Debug)]
 #[derive(Clone)]
-#[derive(Hash)]
-#[derive(Eq)]
-#[derive(PartialEq)]
-#[derive(Ord)]
-#[derive(PartialOrd)]
+#[derive(Hash, Eq, PartialEq)]
 struct ApplianceState {
     active_cycle: u32,
     completed_cycles: u32,
@@ -29,11 +21,7 @@ struct ApplianceState {
 
 #[derive(Debug)]
 #[derive(Clone)]
-#[derive(Hash)]
-#[derive(Eq)]
-#[derive(PartialEq)]
-#[derive(Ord)]
-#[derive(PartialOrd)]
+#[derive(Hash, Eq, PartialEq)]
 struct HomeState {
     timestep: u32,
     battery: BatteryState,
