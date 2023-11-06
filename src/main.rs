@@ -399,6 +399,7 @@ fn main() {
             ],
         }
     );
+    // let home_problem = home_problem_1h();
 
     // let solution = planner::uniform_cost_search(&home_problem, true);
     // let solution = planner::greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
