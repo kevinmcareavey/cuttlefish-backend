@@ -1,103 +1,80 @@
+use std::collections::HashSet;
 use itertools::{Itertools, izip};
+use crate::basic_problem::{ApplianceAction, BatteryAction, BatteryParameters, BatteryState, HomeAction};
 use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
-use crate::planner::{astar, PlanningProblem};
+use crate::planner::{astar, greedy_best_first_search, PlanningProblem, uniform_cost_search, weighted_astar};
 
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(Hash, Eq, PartialEq)]
-pub struct BatteryState {
-    pub level: u32,
-}
-
-#[derive(Debug)]
-#[derive(Clone)]
-#[derive(Hash, Eq, PartialEq)]
-struct ApplianceState {
+struct ExtendedApplianceState {
     active_cycle: u32,
-    completed_cycles: u32,
+    completed_cycles: Vec<u32>,
 }
 
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(Hash, Eq, PartialEq)]
-struct HomeState {
+struct ExtendedHomeState {
     timestep: u32,
     battery: BatteryState,
-    appliances: Vec<ApplianceState>,
+    appliances: Vec<ExtendedApplianceState>,
 }
 
 #[derive(Debug)]
-#[derive(Clone)]
-#[derive(PartialEq)]
-pub enum BatteryAction {
-    DISCHARGE,
-    OFF,
-    CHARGE,
-}
-
-#[derive(Debug)]
-#[derive(Clone)]
-#[derive(PartialEq)]
-pub enum ApplianceAction {
-    OFF,
-    ON,
-}
-
-#[derive(Debug)]
-#[derive(Clone)]
-pub struct HomeAction {
-    pub battery: BatteryAction,
-    pub appliances: Vec<ApplianceAction>,
-}
-
-pub struct BatteryParameters {
-    pub capacity: u32,
-    pub rate: f64,
-    pub initial_level: u32,
-    pub min_required_level: u32,
-}
-
-impl BatteryParameters {
-    fn new(capacity: u32, rate: f64, initial_level: u32, min_required_level: u32) -> Self {
-        assert!(rate > 0.0);
-        assert!(initial_level < capacity);
-        assert!(min_required_level < capacity);
-        return Self { capacity, rate, initial_level, min_required_level };
-    }
-}
-
-struct ApplianceParameters {
-    label: String,
-    duration: u32,
-    rate: f64,
+struct ApplianceWindowParameters {
+    timesteps: HashSet<u32>,
     min_required_cycles: u32,
 }
 
-impl ApplianceParameters {
-    fn new(label: String, duration: u32, rate: f64, min_required_cycles: u32) -> Self {
+impl ApplianceWindowParameters {
+    fn new(timesteps: HashSet<u32>, min_required_cycles: u32) -> Self {
+        return ApplianceWindowParameters { timesteps, min_required_cycles };
+    }
+}
+
+#[derive(Debug)]
+struct ExtendedApplianceParameters {
+    label: String,
+    duration: u32,
+    rate: f64,
+    min_required_cycles: Vec<ApplianceWindowParameters>,
+}
+
+impl ExtendedApplianceParameters {
+    fn new(label: String, duration: u32, rate: f64, min_required_cycles: Vec<ApplianceWindowParameters>) -> Self {
         assert!(duration > 0);
         assert!(rate > 0.0);
+        for (i, window_parameters_i) in min_required_cycles.iter().enumerate() {
+            for (j, window_parameters_j) in min_required_cycles.iter().enumerate() {
+                if i != j {
+                    assert!(window_parameters_i.timesteps.is_disjoint(&window_parameters_j.timesteps));
+                }
+            }
+        }
         return Self { label, duration, rate, min_required_cycles };
     }
 }
 
-struct HomeParameters {
+#[derive(Debug)]
+struct ExtendedHomeParameters {
     horizon: u32,
     battery: BatteryParameters,
-    appliances: Vec<ApplianceParameters>,
+    appliances: Vec<ExtendedApplianceParameters>,
 }
 
-struct HomeProblem {
-    home_parameters: HomeParameters,
+#[derive(Debug)]
+struct ExtendedHomeProblem {
+    home_parameters: ExtendedHomeParameters,
     import_prices: Vec<f64>,
     export_prices: Vec<f64>,
     min_real_cost: Vec<f64>,
-    min_required_timesteps: Vec<u32>,
+    min_required_timesteps: Vec<Vec<u32>>,
     available_actions: Vec<HomeAction>,
 }
 
-impl HomeProblem {
-    fn new(home_parameters: HomeParameters) -> Self {
+impl ExtendedHomeProblem {
+    fn new(home_parameters: ExtendedHomeParameters) -> Self {
         let horizon = usize::try_from(home_parameters.horizon).unwrap();
         let import_prices = IMPORT_PRICES[0..horizon].to_vec();
         let export_prices = EXPORT_PRICES[0..horizon].to_vec();
@@ -119,7 +96,11 @@ impl HomeProblem {
 
         let mut min_required_timesteps = vec![];
         for appliance_parameters in &home_parameters.appliances {
-            min_required_timesteps.push(appliance_parameters.min_required_cycles * appliance_parameters.duration);
+            let mut window_min_required_timesteps = vec![];
+            for window in &appliance_parameters.min_required_cycles {
+                window_min_required_timesteps.push(&window.min_required_cycles * appliance_parameters.duration);
+            }
+            min_required_timesteps.push(window_min_required_timesteps);
         }
 
         let battery_actions = vec![BatteryAction::DISCHARGE, BatteryAction::OFF, BatteryAction::CHARGE];
@@ -140,7 +121,7 @@ impl HomeProblem {
         return Self { home_parameters, import_prices, export_prices, min_real_cost, min_required_timesteps, available_actions }
     }
 
-    fn is_applicable(&self, state: &HomeState, action: &HomeAction) -> bool {
+    fn is_applicable(&self, state: &ExtendedHomeState, action: &HomeAction) -> bool {
         if state.battery.level <= 0 && action.battery == BatteryAction::DISCHARGE {
             return false;
         }
@@ -151,14 +132,24 @@ impl HomeProblem {
             if appliance_state.active_cycle > 0 && *appliance_action == ApplianceAction::OFF {
                 return false;
             }
-            if state.timestep + appliance_parameters.duration - appliance_state.active_cycle - 1 >= self.home_parameters.horizon && *appliance_action == ApplianceAction::ON {
-                return false;
+            if *appliance_action == ApplianceAction::ON {
+                let mut found = false;
+                let required_timesteps = HashSet::from_iter((state.timestep..state.timestep + appliance_parameters.duration - appliance_state.active_cycle));
+                for window_parameters in &appliance_parameters.min_required_cycles {
+                    if required_timesteps.is_subset(&window_parameters.timesteps) {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return false;
+                }
             }
         }
         return true;
     }
 
-    fn heuristic_function(&self, state: &HomeState) -> f64 {
+    fn heuristic_function(&self, state: &ExtendedHomeState) -> f64 {
         let timesteps_to_horizon = self.home_parameters.horizon - state.timestep;
 
         if state.battery.level + timesteps_to_horizon < self.home_parameters.battery.min_required_level {
@@ -166,16 +157,16 @@ impl HomeProblem {
         }
 
         for (appliance_parameters, appliance_state, appliance_min_required_timesteps) in izip!(&self.home_parameters.appliances, &state.appliances, &self.min_required_timesteps) {
-            let appliance_timesteps_completed = (appliance_state.completed_cycles * appliance_parameters.duration) + appliance_state.active_cycle;
+            for (window_parameters, window_completed_cycles, window_min_required_timesteps) in izip!(&appliance_parameters.min_required_cycles, &appliance_state.completed_cycles, appliance_min_required_timesteps) {
+                let window_timesteps_completed = if window_parameters.timesteps.contains(&state.timestep) { (window_completed_cycles * appliance_parameters.duration) + appliance_state.active_cycle } else { window_completed_cycles * appliance_parameters.duration };
+                if window_timesteps_completed > *window_min_required_timesteps {
+                    return f64::INFINITY;
+                }
 
-            if appliance_timesteps_completed > *appliance_min_required_timesteps {
-                return f64::INFINITY;
-            }
-
-            let appliance_timesteps_to_go = appliance_min_required_timesteps - appliance_timesteps_completed;
-
-            if appliance_timesteps_to_go > timesteps_to_horizon {
-                return f64::INFINITY;
+                let window_timesteps_to_go = window_min_required_timesteps - window_timesteps_completed;
+                if window_timesteps_to_go > timesteps_to_horizon {
+                    return f64::INFINITY;
+                }
             }
         }
 
@@ -263,20 +254,24 @@ impl HomeProblem {
     }
 }
 
-impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
-    fn initial_state(&self) -> HomeState {
+impl PlanningProblem<ExtendedHomeState, HomeAction> for ExtendedHomeProblem {
+    fn initial_state(&self) -> ExtendedHomeState {
         let mut appliance_states = vec![];
-        for _ in &self.home_parameters.appliances {
-            appliance_states.push(ApplianceState { active_cycle: 0, completed_cycles: 0 });
+        for appliance_parameters in &self.home_parameters.appliances {
+            let mut completed_cycles = vec![];
+            for _ in &appliance_parameters.min_required_cycles {
+                completed_cycles.push(0);
+            }
+            appliance_states.push(ExtendedApplianceState { active_cycle: 0, completed_cycles });
         }
-        return HomeState {
+        return ExtendedHomeState {
             timestep: 0,
             battery: BatteryState { level: self.home_parameters.battery.initial_level },
             appliances: appliance_states,
         };
     }
 
-    fn applicable_actions(&self, state: &HomeState) -> Vec<&HomeAction> {
+    fn applicable_actions(&self, state: &ExtendedHomeState) -> Vec<&HomeAction> {
         let mut applicable_actions = vec![];
         if state.timestep >= self.home_parameters.horizon {
             return applicable_actions;
@@ -290,32 +285,36 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
         return applicable_actions;
     }
 
-    fn transition_function(&self, state: &HomeState, action: &HomeAction) -> HomeState {
+    fn transition_function(&self, state: &ExtendedHomeState, action: &HomeAction) -> ExtendedHomeState {
         let successor_battery_state = BatteryState { level: if action.battery == BatteryAction::CHARGE { state.battery.level + 1 } else if action.battery == BatteryAction::DISCHARGE { state.battery.level - 1 } else { state.battery.level } };
 
         let mut successor_appliance_states = vec![];
         for (appliance_parameters, appliance_state, appliance_action) in izip!(&self.home_parameters.appliances, &state.appliances, &action.appliances) {
             if *appliance_action == ApplianceAction::ON {
                 if appliance_state.active_cycle == appliance_parameters.duration - 1 {  // cycle ending (and possibly starting as well)
-                    successor_appliance_states.push(ApplianceState { active_cycle: 0, completed_cycles: appliance_state.completed_cycles + 1 });
+                    let mut windows = vec![];
+                    for (window_parameters, window_completed_cycles) in izip!(&appliance_parameters.min_required_cycles, &appliance_state.completed_cycles) {
+                        windows.push(if window_parameters.timesteps.contains(&state.timestep) { window_completed_cycles + 1 } else { *window_completed_cycles });
+                    }
+                    successor_appliance_states.push(ExtendedApplianceState { active_cycle: 0, completed_cycles: windows });
                 } else if appliance_state.active_cycle == 0 {  // cycle starting (but not ending)
-                    successor_appliance_states.push(ApplianceState { active_cycle: 1, completed_cycles: appliance_state.completed_cycles });
+                    successor_appliance_states.push(ExtendedApplianceState { active_cycle: 1, completed_cycles: appliance_state.completed_cycles.clone() });
                 } else {
-                    successor_appliance_states.push(ApplianceState { active_cycle: appliance_state.active_cycle + 1, completed_cycles: appliance_state.completed_cycles });
+                    successor_appliance_states.push(ExtendedApplianceState { active_cycle: appliance_state.active_cycle + 1, completed_cycles: appliance_state.completed_cycles.clone() });
                 }
             } else {
-                successor_appliance_states.push(ApplianceState { active_cycle: 0, completed_cycles: appliance_state.completed_cycles });
+                successor_appliance_states.push(ExtendedApplianceState { active_cycle: 0, completed_cycles: appliance_state.completed_cycles.clone() });
             }
         }
 
-        return HomeState {
+        return ExtendedHomeState {
             timestep: state.timestep + 1,
             battery: successor_battery_state,
             appliances: successor_appliance_states,
         };
     }
 
-    fn cost_function(&self, state: &HomeState, action: &HomeAction, _successor_state: &HomeState) -> f64 {
+    fn cost_function(&self, state: &ExtendedHomeState, action: &HomeAction, _successor_state: &ExtendedHomeState) -> f64 {
         let mut energy = 0.0;
 
         if action.battery == BatteryAction::CHARGE {
@@ -335,7 +334,7 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
         return real_cost - self.min_real_cost[timestep];
     }
 
-    fn is_goal(&self, state: &HomeState) -> bool {
+    fn is_goal(&self, state: &ExtendedHomeState) -> bool {
         if state.timestep != self.home_parameters.horizon {
             return false;
         }
@@ -343,46 +342,65 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
             return false;
         }
         for (appliance_parameters, appliance_state) in izip!(&self.home_parameters.appliances, &state.appliances) {
-            if appliance_state.completed_cycles < appliance_parameters.min_required_cycles {
-                return false;
+            for (window_parameters, window_completed_cycles) in izip!(&appliance_parameters.min_required_cycles, &appliance_state.completed_cycles) {
+                if window_completed_cycles < &window_parameters.min_required_cycles {
+                    return false;
+                }
             }
         }
         return true;
     }
 }
 
-fn _home_problem_base(timesteps_per_hour: u32) -> HomeProblem {
+fn _home_problem_base(timesteps_per_hour: u32) -> ExtendedHomeProblem {
+    let days: u32 = 7;
+    let timesteps_per_day = 24 * timesteps_per_hour;
+    let horizon = days * timesteps_per_day;
+    let washer_dryer_timesteps = HashSet::from_iter((0..horizon).filter(|timestep| 9 <= timestep % timesteps_per_day && timestep % timesteps_per_day < 20));  // any day between 09:00 and 20:00
+    let mut dishwasher_windows = vec![];  // each day between 19:00 and 23:00
+    for day in 0..days {
+        let mut day_dishwasher_timesteps = HashSet::new();
+        for day_timestep in 0..timesteps_per_day {
+            if 19 <= day_timestep && day_timestep < 23 {
+                day_dishwasher_timesteps.insert((day * timesteps_per_day) + day_timestep);
+            }
+        }
+        dishwasher_windows.push(ApplianceWindowParameters::new(day_dishwasher_timesteps.clone(), 1));
+    }
+    let vehicle_timesteps = HashSet::from_iter((0..horizon).filter(|timestep| timestep >= &(5 * timesteps_per_day)));  // Saturday or Sunday
     let timesteps_per_hour_f64 = timesteps_per_hour as f64;
-    return HomeProblem::new(
-        HomeParameters {
+    return ExtendedHomeProblem::new(
+        ExtendedHomeParameters {
             horizon: 168 * timesteps_per_hour,
             battery: BatteryParameters { capacity: 3 * timesteps_per_hour, rate: 3.0 / timesteps_per_hour_f64, initial_level: 0, min_required_level: 0 },
             appliances: vec![
-                ApplianceParameters::new("washer".to_string(), 2 * timesteps_per_hour, 0.75 / timesteps_per_hour_f64, 3),
-                ApplianceParameters::new("dryer".to_string(), 3 * timesteps_per_hour, 1.5 / timesteps_per_hour_f64, 2),
-                ApplianceParameters::new("dishwasher".to_string(), 1 * timesteps_per_hour, 1.2 / timesteps_per_hour_f64, 7),
-                ApplianceParameters::new("vehicle".to_string(), 8 * timesteps_per_hour, 5.0 / timesteps_per_hour_f64, 1),
+                ExtendedApplianceParameters::new("washer".to_string(), 2 * timesteps_per_hour, 0.75 / timesteps_per_hour_f64, vec![ApplianceWindowParameters::new(washer_dryer_timesteps.clone(), 3)]),
+                ExtendedApplianceParameters::new("dryer".to_string(), 3 * timesteps_per_hour, 1.5 / timesteps_per_hour_f64, vec![ApplianceWindowParameters::new(washer_dryer_timesteps.clone(), 2)]),
+                ExtendedApplianceParameters::new("dishwasher".to_string(), 1 * timesteps_per_hour, 1.2 / timesteps_per_hour_f64, dishwasher_windows),
+                ExtendedApplianceParameters::new("vehicle".to_string(), 8 * timesteps_per_hour, 5.0 / timesteps_per_hour_f64, vec![ApplianceWindowParameters::new(vehicle_timesteps.clone(), 1)]),
             ],
         }
     )
 }
 
-fn home_problem_1h() -> HomeProblem {
+fn home_problem_1h() -> ExtendedHomeProblem {
     return _home_problem_base(1);
 }
 
-fn home_problem_30m() -> HomeProblem {
+fn home_problem_30m() -> ExtendedHomeProblem {
     return _home_problem_base(2);
 }
 
-fn home_problem_15m() -> HomeProblem {
+fn home_problem_15m() -> ExtendedHomeProblem {
     return _home_problem_base(4);
 }
 
 pub fn run() {
-    let home_problem = HomeProblem::new(
-        HomeParameters {
-            horizon: 9,
+    let horizon = 9;
+    let timesteps: HashSet<u32> = HashSet::from_iter(0..horizon);
+    let home_problem = ExtendedHomeProblem::new(
+        ExtendedHomeParameters {
+            horizon,
             battery: BatteryParameters {
                 capacity: 20,
                 rate: 0.4,
@@ -390,10 +408,10 @@ pub fn run() {
                 min_required_level: 0,
             },
             appliances: vec![
-                ApplianceParameters::new("washer".to_string(), 3, 0.5, 1),
-                ApplianceParameters::new("dryer".to_string(), 5, 0.9, 1),
-                ApplianceParameters::new("dishwasher".to_string(), 2, 0.6, 1),
-                ApplianceParameters::new("vehicle".to_string(), 8, 3.75, 1),
+                ExtendedApplianceParameters::new("washer".to_string(), 3, 0.5, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+                ExtendedApplianceParameters::new("dryer".to_string(), 5, 0.9, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+                ExtendedApplianceParameters::new("dishwasher".to_string(), 2, 0.6, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+                ExtendedApplianceParameters::new("vehicle".to_string(), 8, 3.75, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
             ],
         }
     );
