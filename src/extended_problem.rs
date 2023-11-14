@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use itertools::{Itertools, izip};
 use crate::basic_problem::{ApplianceAction, BatteryAction, BatteryParameters, BatteryState, HomeAction};
 use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
-use crate::planner::{astar, greedy_best_first_search, PlanningProblem, uniform_cost_search, weighted_astar};
+use crate::planner::{astar, PlanningProblem};
 
 #[derive(Debug)]
 #[derive(Clone)]
