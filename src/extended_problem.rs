@@ -22,14 +22,14 @@ struct ExtendedHomeState {
 }
 
 #[derive(Debug)]
-struct ApplianceWindowParameters {
-    timesteps: HashSet<u32>,
-    min_required_cycles: u32,
+pub struct ApplianceWindowParameters {
+    pub timesteps: HashSet<u32>,
+    pub min_required_cycles: u32,
 }
 
 impl ApplianceWindowParameters {
-    fn new(timesteps: HashSet<u32>, min_required_cycles: u32) -> Self {
-        return ApplianceWindowParameters { timesteps, min_required_cycles };
+    pub fn new(timesteps: HashSet<u32>, min_required_cycles: u32) -> Self {
+        return Self { timesteps, min_required_cycles };
     }
 }
 
@@ -118,7 +118,7 @@ impl ExtendedHomeProblem {
             }
         }
 
-        return Self { home_parameters, import_prices, export_prices, min_real_cost, min_required_timesteps, available_actions }
+        return Self { home_parameters, import_prices, export_prices, min_real_cost, min_required_timesteps, available_actions };
     }
 
     fn is_applicable(&self, state: &ExtendedHomeState, action: &HomeAction) -> bool {
@@ -352,7 +352,50 @@ impl PlanningProblem<ExtendedHomeState, HomeAction> for ExtendedHomeProblem {
     }
 }
 
-fn _home_problem_base(timesteps_per_hour: u32) -> ExtendedHomeProblem {
+fn home_problem_toy(horizon: u32) -> ExtendedHomeProblem {
+    let timesteps: HashSet<u32> = HashSet::from_iter(0..horizon);
+    return ExtendedHomeProblem::new(
+        ExtendedHomeParameters {
+            horizon,
+            battery: BatteryParameters {
+                capacity: 20,
+                rate: 0.4,
+                initial_level: 5,
+                min_required_level: 0,
+            },
+            appliances: vec![
+                ExtendedApplianceParameters::new("washer".to_string(), 3, 0.5, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+                ExtendedApplianceParameters::new("dryer".to_string(), 5, 0.9, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+                ExtendedApplianceParameters::new("dishwasher".to_string(), 2, 0.6, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+                ExtendedApplianceParameters::new("vehicle".to_string(), 8, 3.75, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+            ],
+        }
+    );
+}
+
+fn home_problem_basic(timesteps_per_hour: u32) -> ExtendedHomeProblem {
+    assert!(1 <= timesteps_per_hour && timesteps_per_hour <= 60 && 60 % timesteps_per_hour == 0);
+    let days: u32 = 7;
+    let timesteps_per_day = 24 * timesteps_per_hour;
+    let horizon = days * timesteps_per_day;
+    let timesteps: HashSet<u32> = (0..horizon).collect();
+    let timesteps_per_hour_f64 = timesteps_per_hour as f64;
+    return ExtendedHomeProblem::new(
+        ExtendedHomeParameters {
+            horizon: 168 * timesteps_per_hour,
+            battery: BatteryParameters { capacity: 3 * timesteps_per_hour, rate: 3.0 / timesteps_per_hour_f64, initial_level: 0, min_required_level: 0 },
+            appliances: vec![
+                ExtendedApplianceParameters::new("washer".to_string(), 2 * timesteps_per_hour, 0.75 / timesteps_per_hour_f64, vec![ApplianceWindowParameters::new(timesteps.clone(), 3)]),
+                ExtendedApplianceParameters::new("dryer".to_string(), 3 * timesteps_per_hour, 1.5 / timesteps_per_hour_f64, vec![ApplianceWindowParameters::new(timesteps.clone(), 2)]),
+                ExtendedApplianceParameters::new("dishwasher".to_string(), 1 * timesteps_per_hour, 1.2 / timesteps_per_hour_f64, vec![ApplianceWindowParameters::new(timesteps.clone(), 7)]),
+                ExtendedApplianceParameters::new("vehicle".to_string(), 8 * timesteps_per_hour, 5.0 / timesteps_per_hour_f64, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
+            ],
+        }
+    )
+}
+
+fn home_problem_extended(timesteps_per_hour: u32) -> ExtendedHomeProblem {
+    assert!(1 <= timesteps_per_hour && timesteps_per_hour <= 60 && 60 % timesteps_per_hour == 0);
     let days: u32 = 7;
     let timesteps_per_day = 24 * timesteps_per_hour;
     let horizon = days * timesteps_per_day;
@@ -383,44 +426,15 @@ fn _home_problem_base(timesteps_per_hour: u32) -> ExtendedHomeProblem {
     )
 }
 
-fn home_problem_1h() -> ExtendedHomeProblem {
-    return _home_problem_base(1);
-}
-
-fn home_problem_30m() -> ExtendedHomeProblem {
-    return _home_problem_base(2);
-}
-
-fn home_problem_15m() -> ExtendedHomeProblem {
-    return _home_problem_base(4);
-}
-
 pub fn run() {
-    let horizon = 9;
-    let timesteps: HashSet<u32> = HashSet::from_iter(0..horizon);
-    let home_problem = ExtendedHomeProblem::new(
-        ExtendedHomeParameters {
-            horizon,
-            battery: BatteryParameters {
-                capacity: 20,
-                rate: 0.4,
-                initial_level: 5,
-                min_required_level: 0,
-            },
-            appliances: vec![
-                ExtendedApplianceParameters::new("washer".to_string(), 3, 0.5, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
-                ExtendedApplianceParameters::new("dryer".to_string(), 5, 0.9, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
-                ExtendedApplianceParameters::new("dishwasher".to_string(), 2, 0.6, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
-                ExtendedApplianceParameters::new("vehicle".to_string(), 8, 3.75, vec![ApplianceWindowParameters::new(timesteps.clone(), 1)]),
-            ],
-        }
-    );
-    // let home_problem = home_problem_1h();
+    // let home_problem = home_problem_toy(9);  // states visited: 7597, total time: 66.206ms, cost: -16.564 + 271.8064 = 255.2424
+    // let home_problem = home_problem_basic(1);  // states visited: 3618227, total time: 53.979608959s, cost: -2988.1500000000024 + 3296.974650000001 = 308.8246500000001
+    let home_problem = home_problem_extended(1);  // states visited: 2924447, total time: 36.957981542s, cost: -2988.1500000000024 + 3324.2307000000023 = 336.0807000000001
 
     // let solution = uniform_cost_search(&home_problem, true);
-    // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
     let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
     // let solution = weighted_astar(&home_problem, |state| home_problem.heuristic_function(state), 2.0, true);
+    // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
     if solution.is_some() {
         let (plan, cost) = solution.unwrap();
         for action in &plan {

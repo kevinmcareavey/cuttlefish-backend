@@ -50,6 +50,7 @@ pub struct HomeAction {
     pub appliances: Vec<ApplianceAction>,
 }
 
+#[derive(Debug)]
 pub struct BatteryParameters {
     pub capacity: u32,
     pub rate: f64,
@@ -66,6 +67,7 @@ impl BatteryParameters {
     }
 }
 
+#[derive(Debug)]
 struct ApplianceParameters {
     label: String,
     duration: u32,
@@ -81,12 +83,14 @@ impl ApplianceParameters {
     }
 }
 
+#[derive(Debug)]
 struct HomeParameters {
     horizon: u32,
     battery: BatteryParameters,
     appliances: Vec<ApplianceParameters>,
 }
 
+#[derive(Debug)]
 struct HomeProblem {
     home_parameters: HomeParameters,
     import_prices: Vec<f64>,
@@ -351,7 +355,28 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
     }
 }
 
-fn _home_problem_base(timesteps_per_hour: u32) -> HomeProblem {
+fn home_problem_toy(horizon: u32) -> HomeProblem {
+    return HomeProblem::new(
+        HomeParameters {
+            horizon,
+            battery: BatteryParameters {
+                capacity: 20,
+                rate: 0.4,
+                initial_level: 5,
+                min_required_level: 0,
+            },
+            appliances: vec![
+                ApplianceParameters::new("washer".to_string(), 3, 0.5, 1),
+                ApplianceParameters::new("dryer".to_string(), 5, 0.9, 1),
+                ApplianceParameters::new("dishwasher".to_string(), 2, 0.6, 1),
+                ApplianceParameters::new("vehicle".to_string(), 8, 3.75, 1),
+            ],
+        }
+    );
+}
+
+fn home_problem_basic(timesteps_per_hour: u32) -> HomeProblem {
+    assert!(1 <= timesteps_per_hour && timesteps_per_hour <= 60 && 60 % timesteps_per_hour == 0);
     let timesteps_per_hour_f64 = timesteps_per_hour as f64;
     return HomeProblem::new(
         HomeParameters {
@@ -367,42 +392,14 @@ fn _home_problem_base(timesteps_per_hour: u32) -> HomeProblem {
     )
 }
 
-fn home_problem_1h() -> HomeProblem {
-    return _home_problem_base(1);
-}
-
-fn home_problem_30m() -> HomeProblem {
-    return _home_problem_base(2);
-}
-
-fn home_problem_15m() -> HomeProblem {
-    return _home_problem_base(4);
-}
-
 pub fn run() {
-    let home_problem = HomeProblem::new(
-        HomeParameters {
-            horizon: 9,
-            battery: BatteryParameters {
-                capacity: 20,
-                rate: 0.4,
-                initial_level: 5,
-                min_required_level: 0,
-            },
-            appliances: vec![
-                ApplianceParameters::new("washer".to_string(), 3, 0.5, 1),
-                ApplianceParameters::new("dryer".to_string(), 5, 0.9, 1),
-                ApplianceParameters::new("dishwasher".to_string(), 2, 0.6, 1),
-                ApplianceParameters::new("vehicle".to_string(), 8, 3.75, 1),
-            ],
-        }
-    );
-    // let home_problem = home_problem_1h();
+    let home_problem = home_problem_toy(9);  // states visited: 7597, total time: 26.172834ms, cost: -16.564 + 271.8064 = 255.2424
+    // let home_problem = home_problem_basic(1);  // states visited: 3618227, total time: 25.484389958s, cost: -2988.1500000000024 + 3296.974650000001 = 308.8246500000001
 
     // let solution = uniform_cost_search(&home_problem, true);
-    // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
     let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
     // let solution = weighted_astar(&home_problem, |state| home_problem.heuristic_function(state), 2.0, true);
+    // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
     if solution.is_some() {
         let (plan, cost) = solution.unwrap();
         for action in &plan {
