@@ -41,21 +41,18 @@ impl Ord for MyF64 {
     }
 }
 
-fn reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State, Node<State, Action>>, initial_state: &State, terminal_state: &State) -> Option<(Vec<Action>, f64)> {
+fn reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State, Node<State, Action>>, terminal_state: &State) -> Option<(Vec<Action>, f64)> {
     let mut plan = vec![];
     let mut state = terminal_state;
     loop {
-        if state == initial_state {
-            plan.reverse();  // actions were added in reverse order so reverse in-place
-            return Some((plan, nodes.get(&terminal_state).unwrap().path_cost));
-        }
         let optional_node = &nodes.get(&state);
         if optional_node.is_none() {
             break;
         }
         let optional_parent = &optional_node.unwrap().parent;
-        if optional_parent.is_none() {
-            break;
+        if optional_parent.is_none() {  // reached initial state
+            plan.reverse();  // actions were added in reverse order so reverse in-place
+            return Some((plan, nodes.get(&terminal_state).unwrap().path_cost));
         }
         let parent = optional_parent.as_ref().unwrap();
         state = &parent.state;
@@ -117,7 +114,7 @@ fn best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: 
                 let elapsed_time = start_time.elapsed();
                 println!("max depth: {:?}, states visited: {:?}, total time: {:?}", max_depth, max_states_visited, elapsed_time);
             }
-            let solution = reconstruct_solution(&nodes, &initial_state, &selected_state);
+            let solution = reconstruct_solution(&nodes, &selected_state);
             if solution.is_none() {
                 println!("error in reconstructing solution")
             }
