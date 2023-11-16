@@ -154,10 +154,6 @@ pub fn uniform_cost_search<State: Hash + Eq + Clone, Action: Clone>(planning_pro
     return best_first_search(planning_problem, |path_cost, _| path_cost, verbose);
 }
 
-pub fn greedy_best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
-    return best_first_search(planning_problem, |_, state| heuristic_function(state), verbose);
-}
-
 pub fn astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
     return best_first_search(planning_problem, |path_cost, state| path_cost + heuristic_function(state), verbose);
 }
@@ -165,4 +161,8 @@ pub fn astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl Pl
 pub fn weighted_astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, weight: f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
     assert!(weight > 1.0);
     return best_first_search(planning_problem, |path_cost, state| path_cost + weight * heuristic_function(state), verbose);
+}
+
+pub fn greedy_best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
+    return best_first_search(planning_problem, |_, state| heuristic_function(state), verbose);
 }
