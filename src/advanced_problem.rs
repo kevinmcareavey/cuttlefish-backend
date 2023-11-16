@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Instant;
 use infinitable::{Finite, Infinitable, Infinity};
 use itertools::{Itertools, izip};
 use crate::basic_problem::{ApplianceAction, BatteryAction, BatteryParameters, BatteryState, HomeAction};
@@ -502,10 +503,13 @@ pub fn run() {
     // let home_problem = home_problem_extended(1);  // states visited: 2924447, total time: 38.808083625s, cost: -2988.1500000000024 + 3324.2307000000023 = 336.0807000000001
     // let home_problem = home_problem_advanced(1);  // states visited: 2948085, total time: 36.471627917s, cost: -2988.1500000000024 + 3325.0296000000026 = 336.8796000000001
 
+    let start_time = Instant::now();
     // let solution = uniform_cost_search(&home_problem, true);
     let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
     // let solution = weighted_astar(&home_problem, |state| home_problem.heuristic_function(state), 2.0, true);
     // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
+    println!("total runtime: {:?}", Instant::now() - start_time);
+
     if solution.is_some() {
         let (plan, cost) = solution.unwrap();
         for action in &plan {

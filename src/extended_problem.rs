@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Instant;
 use itertools::{Itertools, izip};
 use crate::basic_problem::{ApplianceAction, BatteryAction, BatteryParameters, BatteryState, HomeAction};
 use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
@@ -427,14 +428,17 @@ fn home_problem_extended(timesteps_per_hour: u32) -> ExtendedHomeProblem {
 }
 
 pub fn run() {
-    // let home_problem = home_problem_toy(9);  // states visited: 7597, total time: 66.206ms, cost: -16.564 + 271.8064 = 255.2424
+    let home_problem = home_problem_toy(9);  // states visited: 7597, total time: 66.206ms, cost: -16.564 + 271.8064 = 255.2424
     // let home_problem = home_problem_basic(1);  // states visited: 3618227, total time: 53.979608959s, cost: -2988.1500000000024 + 3296.974650000001 = 308.8246500000001
-    let home_problem = home_problem_extended(1);  // states visited: 2924447, total time: 36.957981542s, cost: -2988.1500000000024 + 3324.2307000000023 = 336.0807000000001
+    // let home_problem = home_problem_extended(1);  // states visited: 2924447, total time: 36.957981542s, cost: -2988.1500000000024 + 3324.2307000000023 = 336.0807000000001
 
+    let start_time = Instant::now();
     // let solution = uniform_cost_search(&home_problem, true);
     let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
     // let solution = weighted_astar(&home_problem, |state| home_problem.heuristic_function(state), 2.0, true);
     // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
+    println!("total runtime: {:?}", Instant::now() - start_time);
+
     if solution.is_some() {
         let (plan, cost) = solution.unwrap();
         for action in &plan {
