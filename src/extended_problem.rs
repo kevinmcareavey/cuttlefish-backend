@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::time::Instant;
 use itertools::{Itertools, izip};
+use serde::{Deserialize, Serialize};
 use crate::basic_problem::{ApplianceAction, BatteryAction, BatteryParameters, BatteryState, HomeAction};
 use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
 use crate::planner::{astar, PlanningProblem};
@@ -22,7 +23,7 @@ struct ExtendedHomeState {
     appliances: Vec<ExtendedApplianceState>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ApplianceWindowParameters {
     pub timesteps: HashSet<u32>,
     pub min_required_cycles: u32,

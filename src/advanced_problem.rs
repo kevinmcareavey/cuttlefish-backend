@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::time::Instant;
 use infinitable::{Finite, Infinitable, Infinity};
 use itertools::{Itertools, izip};
+use serde::{Deserialize, Serialize};
 use crate::basic_problem::{ApplianceAction, BatteryAction, BatteryParameters, BatteryState, HomeAction};
 use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
 use crate::extended_problem::ApplianceWindowParameters;
@@ -19,13 +20,13 @@ struct AdvancedApplianceState {
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(Hash, Eq, PartialEq)]
-struct AdvancedHomeState {
+pub struct AdvancedHomeState {
     timestep: u32,
     battery: BatteryState,
     appliances: Vec<AdvancedApplianceState>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AdvancedApplianceParameters {
     label: String,
     duration: u32,
@@ -49,15 +50,15 @@ impl AdvancedApplianceParameters {
     }
 }
 
-#[derive(Debug)]
-struct AdvancedHomeParameters {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AdvancedHomeParameters {
     horizon: u32,
     battery: BatteryParameters,
     appliances: Vec<AdvancedApplianceParameters>,
 }
 
 #[derive(Debug)]
-struct AdvancedHomeProblem {
+pub struct AdvancedHomeProblem {
     home_parameters: AdvancedHomeParameters,
     dependencies_max: Vec<Option<u32>>,
     import_prices: Vec<f64>,
@@ -68,7 +69,7 @@ struct AdvancedHomeProblem {
 }
 
 impl AdvancedHomeProblem {
-    fn new(home_parameters: AdvancedHomeParameters) -> Self {
+    pub fn new(home_parameters: AdvancedHomeParameters) -> Self {
         let mut dependencies_max = vec![];
         for (i, _) in home_parameters.appliances.iter().enumerate() {
             let mut found = false;
@@ -176,7 +177,7 @@ impl AdvancedHomeProblem {
         return true;
     }
 
-    fn heuristic_function(&self, state: &AdvancedHomeState) -> f64 {
+    pub fn heuristic_function(&self, state: &AdvancedHomeState) -> f64 {
         let timesteps_to_horizon = self.home_parameters.horizon - state.timestep;
 
         if state.battery.level + timesteps_to_horizon < self.home_parameters.battery.min_required_level {

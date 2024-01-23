@@ -2,6 +2,7 @@ use chrono::Local;
 use rand::Rng;
 use rusqlite::{Connection, Result, RowIndex};
 use serde::{Deserialize, Serialize};
+use crate::advanced_problem::AdvancedHomeProblem;
 use crate::basic_problem::{ApplianceAction, BatteryAction, HomeProblem};
 use crate::planner::astar;
 
@@ -73,7 +74,7 @@ fn run(db_path: String) {
 
     for problem in problems {
         let Ok(home_parameters) = serde_json::from_str(&problem.data) else { continue };
-        let home_problem = HomeProblem::new(home_parameters);
+        let home_problem = AdvancedHomeProblem::new(home_parameters);
         let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
         if solution.is_some() {
             let (plan, _) = solution.unwrap();
@@ -107,5 +108,5 @@ fn main() {
     // basic_problem::run();
     // extended_problem::run();
     // advanced_problem::run();
-    run("/Users/kevin/Workspace/pyhomeschedulerapi/shared.db".to_string());
+    run("/Users/kevin/Workspace/cuttlefish-api/shared.db".to_string());
 }
