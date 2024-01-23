@@ -1,5 +1,6 @@
 use std::time::Instant;
 use itertools::{Itertools, izip};
+use serde::{Deserialize, Serialize};
 use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
 use crate::planner::{astar, PlanningProblem};
 
@@ -21,7 +22,7 @@ struct ApplianceState {
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(Hash, Eq, PartialEq)]
-struct HomeState {
+pub struct HomeState {
     timestep: u32,
     battery: BatteryState,
     appliances: Vec<ApplianceState>,
@@ -30,6 +31,7 @@ struct HomeState {
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(PartialEq)]
+#[derive(Serialize, Deserialize)]
 pub enum BatteryAction {
     DISCHARGE,
     OFF,
@@ -39,6 +41,7 @@ pub enum BatteryAction {
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(PartialEq)]
+#[derive(Serialize, Deserialize)]
 pub enum ApplianceAction {
     OFF,
     ON,
@@ -46,12 +49,13 @@ pub enum ApplianceAction {
 
 #[derive(Debug)]
 #[derive(Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct HomeAction {
     pub battery: BatteryAction,
     pub appliances: Vec<ApplianceAction>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BatteryParameters {
     pub capacity: u32,
     pub rate: f64,
@@ -68,7 +72,7 @@ impl BatteryParameters {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ApplianceParameters {
     label: String,
     duration: u32,
@@ -84,15 +88,15 @@ impl ApplianceParameters {
     }
 }
 
-#[derive(Debug)]
-struct HomeParameters {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HomeParameters {
     horizon: u32,
     battery: BatteryParameters,
     appliances: Vec<ApplianceParameters>,
 }
 
 #[derive(Debug)]
-struct HomeProblem {
+pub struct HomeProblem {
     home_parameters: HomeParameters,
     import_prices: Vec<f64>,
     export_prices: Vec<f64>,
@@ -102,7 +106,7 @@ struct HomeProblem {
 }
 
 impl HomeProblem {
-    fn new(home_parameters: HomeParameters) -> Self {
+    pub fn new(home_parameters: HomeParameters) -> Self {
         let horizon = usize::try_from(home_parameters.horizon).unwrap();
         let import_prices = IMPORT_PRICES[0..horizon].to_vec();
         let export_prices = EXPORT_PRICES[0..horizon].to_vec();
@@ -163,7 +167,7 @@ impl HomeProblem {
         return true;
     }
 
-    fn heuristic_function(&self, state: &HomeState) -> f64 {
+    pub fn heuristic_function(&self, state: &HomeState) -> f64 {
         let timesteps_to_horizon = self.home_parameters.horizon - state.timestep;
 
         if state.battery.level + timesteps_to_horizon < self.home_parameters.battery.min_required_level {
