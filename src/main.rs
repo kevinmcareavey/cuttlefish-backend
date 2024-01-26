@@ -108,5 +108,5 @@ fn main() {
     // basic_problem::run();
     // extended_problem::run();
     // advanced_problem::run();
-    run("/Users/kevin/Workspace/cuttlefish-api/shared.db".to_string());
+    run("/Users/kevin/Workspace/cuttlefish-api/cuttlefish.db".to_string());
 }
