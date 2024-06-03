@@ -1,7 +1,8 @@
+use std::cmp::max;
 use std::ops::{Add, Sub};
 use std::thread::sleep;
 use std::time::Duration;
-use chrono::{Local, Duration as ChronoDuration};
+use chrono::{Local, Duration as ChronoDuration, DateTime};
 use rand::Rng;
 use rusqlite::{Connection, Result, RowIndex};
 use serde::{Deserialize, Serialize};
@@ -45,15 +46,15 @@ fn random_solution(horizon: u32, num_appliances: u32) -> Vec<Action> {
     return solution;
 }
 
-fn retrieve_problems(db_path: String) -> Result<Vec<Problem>> {
+fn retrieve_problems(db_path: String, started_at: DateTime<Local>) -> Result<Vec<Problem>> {
     let mut problems = vec![];
 
     let connection = Connection::open(db_path)?;
 
     let retrieved_at = Local::now();
-    let timeout = retrieved_at - ChronoDuration::minutes(15);
+    let timeout = max(started_at, retrieved_at - ChronoDuration::minutes(15));
     let data = (&retrieved_at.to_rfc3339(), &timeout.to_rfc3339());
-    let mut statement = connection.prepare("UPDATE problems SET retrieved_at = ?1 WHERE retrieved_at IS NULL OR retrieved_at < ?2 RETURNING problem_id, problem_data")?;
+    let mut statement = connection.prepare("UPDATE problems SET retrieved_at = ?1 WHERE retrieved_at IS NULL OR ( solution_data IS NULL AND retrieved_at < ?2 ) RETURNING problem_id, problem_data")?;
     let mut rows = statement.query(data)?;
 
     while let Some(row) = rows.next()? {
@@ -114,10 +115,11 @@ fn main() {
     // extended_problem::run();
     // advanced_problem::run();
 
+    let started_at = Local::now();
     let pool = ThreadPool::new(4);
 
     loop {
-        if let Ok(problems) = retrieve_problems("/Users/km17304/Workspace/cuttlefish/cuttlefish.db".to_string()) {
+        if let Ok(problems) = retrieve_problems("/Users/km17304/Workspace/cuttlefish/cuttlefish.db".to_string(), started_at) {
             for problem in problems {
                 pool.execute(|| {
                     println!("adding problem {:?} to thread pool", problem.id);
