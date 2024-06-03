@@ -107,6 +107,7 @@ fn solve(db_path: String, problem: Problem) {
         let Ok(_) = update_solution(db_path.clone(), problem, solution_data) else { return };
     } else {
         println!("problem {:?} is unsolvable", problem.id);
+        let Ok(_) = update_solution(db_path.clone(), problem, "unsolvable".to_string()) else { return };
     }
 }
 
