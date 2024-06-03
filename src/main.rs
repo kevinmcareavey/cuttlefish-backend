@@ -1,16 +1,21 @@
-use chrono::Local;
+use std::ops::{Add, Sub};
+use std::thread::sleep;
+use std::time::Duration;
+use chrono::{Local, Duration as ChronoDuration};
 use rand::Rng;
 use rusqlite::{Connection, Result, RowIndex};
 use serde::{Deserialize, Serialize};
 use crate::advanced_problem::AdvancedHomeProblem;
 use crate::basic_problem::{ApplianceAction, BatteryAction, HomeProblem};
 use crate::planner::astar;
+use crate::thread::ThreadPool;
 
 mod data;
 mod planner;
 mod basic_problem;
 mod extended_problem;
 mod advanced_problem;
+mod thread;
 
 #[derive(Debug)]
 struct Problem {
@@ -44,8 +49,12 @@ fn retrieve_problems(db_path: String) -> Result<Vec<Problem>> {
     let mut problems = vec![];
 
     let connection = Connection::open(db_path)?;
-    let mut statement = connection.prepare("SELECT problem_id, problem_data FROM problems WHERE solution_data IS NULL LIMIT 1")?;
-    let mut rows = statement.query([])?;
+
+    let retrieved_at = Local::now();
+    let timeout = retrieved_at - ChronoDuration::minutes(15);
+    let data = (&retrieved_at.to_rfc3339(), &timeout.to_rfc3339());
+    let mut statement = connection.prepare("UPDATE problems SET retrieved_at = ?1 WHERE retrieved_at IS NULL OR retrieved_at < ?2 RETURNING problem_id, problem_data")?;
+    let mut rows = statement.query(data)?;
 
     while let Some(row) = rows.next()? {
         problems.push(Problem {
@@ -61,7 +70,6 @@ fn update_solution(db_path: String, problem: Problem, solution_data: String) -> 
     let connection = Connection::open(db_path)?;
     let updated_at = Local::now().to_rfc3339();
     let data = (&updated_at, &solution_data, &problem.id);
-    println!("UPDATE {:?}", data);
     connection.execute(
         "UPDATE problems SET updated_at = ?1, solution_data = ?2 WHERE problem_id = ?3",
         data,
@@ -69,38 +77,35 @@ fn update_solution(db_path: String, problem: Problem, solution_data: String) -> 
     return Ok(());
 }
 
-fn run(db_path: String) {
-    let Ok(problems) = retrieve_problems(db_path.clone()) else { return };
-
-    for problem in problems {
-        let Ok(home_parameters) = serde_json::from_str(&problem.data) else { continue };
-        let home_problem = AdvancedHomeProblem::new(home_parameters);
-        let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
-        if solution.is_some() {
-            let (plan, _) = solution.unwrap();
-            let mut integer_plan = vec![];
-            for action in plan {
-                let mut appliance_actions = vec![];
-                for appliance_action in action.appliances {
-                    appliance_actions.push(match appliance_action {
-                        ApplianceAction::ON => 1,
-                        ApplianceAction::OFF => 0,
-                    });
-                }
-                integer_plan.push(Action {
-                    battery: match action.battery {
-                        BatteryAction::DISCHARGE => -1,
-                        BatteryAction::OFF => 0,
-                        BatteryAction::CHARGE => 1,
-                    },
-                    appliances: appliance_actions,
+fn solve(db_path: String, problem: Problem) {
+    let Ok(home_parameters) = serde_json::from_str(&problem.data) else { return };
+    let home_problem = AdvancedHomeProblem::new(home_parameters);
+    let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), false);
+    if solution.is_some() {
+        println!("problem {:?} is solved", problem.id);
+        let (plan, _) = solution.unwrap();
+        let mut integer_plan = vec![];
+        for action in plan {
+            let mut appliance_actions = vec![];
+            for appliance_action in action.appliances {
+                appliance_actions.push(match appliance_action {
+                    ApplianceAction::ON => 1,
+                    ApplianceAction::OFF => 0,
                 });
             }
-            let Ok(solution_data) = serde_json::to_string(&integer_plan) else { continue };
-            let Ok(_) = update_solution(db_path.clone(), problem, solution_data) else { continue };
-        } else {
-            println!("{:?} is unsolvable", problem.id);
+            integer_plan.push(Action {
+                battery: match action.battery {
+                    BatteryAction::DISCHARGE => -1,
+                    BatteryAction::OFF => 0,
+                    BatteryAction::CHARGE => 1,
+                },
+                appliances: appliance_actions,
+            });
         }
+        let Ok(solution_data) = serde_json::to_string(&integer_plan) else { return };
+        let Ok(_) = update_solution(db_path.clone(), problem, solution_data) else { return };
+    } else {
+        println!("problem {:?} is unsolvable", problem.id);
     }
 }
 
@@ -108,5 +113,19 @@ fn main() {
     // basic_problem::run();
     // extended_problem::run();
     // advanced_problem::run();
-    run("/Users/kevin/Workspace/cuttlefish-api/cuttlefish.db".to_string());
+
+    let pool = ThreadPool::new(4);
+
+    loop {
+        if let Ok(problems) = retrieve_problems("/Users/km17304/Workspace/cuttlefish/cuttlefish.db".to_string()) {
+            for problem in problems {
+                pool.execute(|| {
+                    println!("adding problem {:?} to thread pool", problem.id);
+                    solve("/Users/km17304/Workspace/cuttlefish/cuttlefish.db".to_string(), problem);
+                });
+            }
+        }
+
+        sleep(Duration::from_secs(1));
+    }
 }
