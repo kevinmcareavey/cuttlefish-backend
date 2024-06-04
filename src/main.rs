@@ -142,7 +142,7 @@ fn main() {
     let pool = ThreadPool::new(config.pool.max_threads.get() as usize);
 
     loop {
-        if let Ok(problems) = retrieve_problems(&config.database.path.clone(), started_at) {
+        if let Ok(problems) = retrieve_problems(&config.database.path, started_at) {
             for problem in problems {
                 let db_path = config.database.path.clone();
                 pool.execute(move || {
