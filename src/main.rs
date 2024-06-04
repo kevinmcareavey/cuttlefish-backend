@@ -1,4 +1,6 @@
 use std::cmp::max;
+use std::{env, fs};
+use std::num::NonZeroU8;
 use std::ops::{Add, Sub};
 use std::thread::sleep;
 use std::time::Duration;
@@ -9,14 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::advanced_problem::AdvancedHomeProblem;
 use crate::basic_problem::{ApplianceAction, BatteryAction, HomeProblem};
 use crate::planner::astar;
-use crate::thread::ThreadPool;
+use threadpool::ThreadPool;
 
 mod data;
 mod planner;
 mod basic_problem;
 mod extended_problem;
 mod advanced_problem;
-mod thread;
 
 #[derive(Debug)]
 struct Problem {
@@ -46,7 +47,7 @@ fn random_solution(horizon: u32, num_appliances: u32) -> Vec<Action> {
     return solution;
 }
 
-fn retrieve_problems(db_path: String, started_at: DateTime<Local>) -> Result<Vec<Problem>> {
+fn retrieve_problems(db_path: &String, started_at: DateTime<Local>) -> Result<Vec<Problem>> {
     let mut problems = vec![];
 
     let connection = Connection::open(db_path)?;
@@ -67,7 +68,7 @@ fn retrieve_problems(db_path: String, started_at: DateTime<Local>) -> Result<Vec
     return Ok(problems);
 }
 
-fn update_solution(db_path: String, problem: Problem, solution_data: String) -> Result<()> {
+fn update_solution(db_path: &String, problem: Problem, solution_data: String) -> Result<()> {
     let connection = Connection::open(db_path)?;
     let updated_at = Local::now().to_rfc3339();
     let data = (&updated_at, &solution_data, &problem.id);
@@ -78,7 +79,7 @@ fn update_solution(db_path: String, problem: Problem, solution_data: String) -> 
     return Ok(());
 }
 
-fn solve(db_path: String, problem: Problem) {
+fn solve(db_path: &String, problem: Problem) {
     let Ok(home_parameters) = serde_json::from_str(&problem.data) else { return };
     let home_problem = AdvancedHomeProblem::new(home_parameters);
     let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), false);
@@ -104,11 +105,28 @@ fn solve(db_path: String, problem: Problem) {
             });
         }
         let Ok(solution_data) = serde_json::to_string(&integer_plan) else { return };
-        let Ok(_) = update_solution(db_path.clone(), problem, solution_data) else { return };
+        let Ok(_) = update_solution(db_path, problem, solution_data) else { return };
     } else {
         println!("problem {:?} is unsolvable", problem.id);
-        let Ok(_) = update_solution(db_path.clone(), problem, "unsolvable".to_string()) else { return };
+        let Ok(_) = update_solution(db_path, problem, "unsolvable".to_string()) else { return };
     }
+}
+
+#[derive(Deserialize, Debug)]
+struct Config {
+    database: DatabaseConfig,
+    pool: PoolConfig,
+}
+
+#[derive(Deserialize, Debug)]
+struct DatabaseConfig {
+    path: String,
+    scan_seconds: u16,
+}
+
+#[derive(Deserialize, Debug)]
+struct PoolConfig {
+    max_threads: NonZeroU8,
 }
 
 fn main() {
@@ -116,19 +134,24 @@ fn main() {
     // extended_problem::run();
     // advanced_problem::run();
 
+    let args: Vec<String> = env::args().collect();
+    let contents = fs::read_to_string(&args[1]).expect("Error reading config file");
+    let config: Config = toml::from_str(&contents).expect("Error parsing config from TOML");
+
     let started_at = Local::now();
-    let pool = ThreadPool::new(4);
+    let pool = ThreadPool::new(config.pool.max_threads.get() as usize);
 
     loop {
-        if let Ok(problems) = retrieve_problems("/Users/km17304/Workspace/cuttlefish/cuttlefish.db".to_string(), started_at) {
+        if let Ok(problems) = retrieve_problems(&config.database.path.clone(), started_at) {
             for problem in problems {
-                pool.execute(|| {
+                let db_path = config.database.path.clone();
+                pool.execute(move || {
                     println!("adding problem {:?} to thread pool", problem.id);
-                    solve("/Users/km17304/Workspace/cuttlefish/cuttlefish.db".to_string(), problem);
+                    solve(&db_path, problem);
                 });
             }
         }
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(config.database.scan_seconds as u64));
     }
 }

@@ -1,0 +1,6 @@
+[database]
+path = "/path/to/cuttlefish.db"
+scan_seconds = 1
+
+[pool]
+max_threads = 4
