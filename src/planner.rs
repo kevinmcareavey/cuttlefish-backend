@@ -2,6 +2,7 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::time::Instant;
+use std::time::Duration;
 use priority_queue::PriorityQueue;
 
 pub trait PlanningProblem<State, Action> {
@@ -41,7 +42,15 @@ impl Ord for MyF64 {
     }
 }
 
-fn reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State, Node<State, Action>>, terminal_state: &State) -> Option<(Vec<Action>, f64)> {
+pub enum SearchResult<Action> {
+    Unsolvable,
+    TimeBudgetExceeded,
+    SpaceBudgetExceeded,
+    SolutionError,
+    Solution(Vec<Action>, f64),
+}
+
+fn reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State, Node<State, Action>>, terminal_state: &State) -> SearchResult<Action> {
     let mut plan = vec![];
     let mut state = terminal_state;
     loop {
@@ -52,17 +61,17 @@ fn reconstruct_solution<State: Hash + Eq, Action: Clone>(nodes: &HashMap<State, 
         let optional_parent = &optional_node.unwrap().parent;
         if optional_parent.is_none() {  // reached initial state
             plan.reverse();  // actions were added in reverse order so reverse in-place
-            return Some((plan, nodes.get(&terminal_state).unwrap().path_cost));
+            return SearchResult::Solution(plan, nodes.get(&terminal_state).unwrap().path_cost);
         }
         let parent = optional_parent.as_ref().unwrap();
         state = &parent.state;
         let action = &parent.action;
         plan.push(action.clone());
     }
-    return None;
+    return SearchResult::SolutionError;
 }
 
-fn best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, evaluation_function: impl Fn(f64, &State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
+fn best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, evaluation_function: impl Fn(f64, &State) -> f64, verbose: bool, time_budget: Option<u32>, space_budget: Option<u32>) -> SearchResult<Action> {
     let start_time = Instant::now();
 
     let initial_state: State = planning_problem.initial_state();
@@ -88,19 +97,39 @@ fn best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: 
     let mut previous_max_depth: u32 = 0;
     let mut previous_max_states_visited: u32 = 0;
 
+    let monitor_stats: bool = verbose || space_budget.is_some() || time_budget.is_some();
+
     while !frontier.is_empty() {
         let selected_state = frontier.pop().unwrap().0.1;  // tuple = ((insertion_index, state), priority)
         frontier_items.remove(&selected_state);
 
-        if verbose {
+        if monitor_stats {
+            if time_budget.is_some() {
+                let elapsed_time = start_time.elapsed();
+                if elapsed_time > Duration::from_secs(time_budget.unwrap() as u64) {
+                    if verbose {
+                        println!("time budget exceeded");
+                    }
+                    return SearchResult::TimeBudgetExceeded;
+                }
+            }
+            let states_visited = nodes.len() as u32;
+            if space_budget.is_some() && states_visited > space_budget.unwrap() {
+                if verbose {
+                    println!("space budget exceeded");
+                }
+                return SearchResult::SpaceBudgetExceeded;
+            }
+            if states_visited > max_states_visited {
+                max_states_visited = states_visited;
+            }
             let current_depth = nodes.get(&selected_state).unwrap().depth;
             if current_depth > max_depth {
                 max_depth = current_depth;
             }
-            let states_visited = nodes.len() as u32;
-            if states_visited > max_states_visited {
-                max_states_visited = states_visited;
-            }
+        }
+
+        if verbose {
             if max_depth > previous_max_depth || max_states_visited > (previous_max_states_visited as f64 * 1.1) as u32 {
                 let elapsed_time = start_time.elapsed();
                 println!("max depth: {:?}, states visited: {:?}, elapsed time: {:?}", max_depth, max_states_visited, elapsed_time);
@@ -115,8 +144,9 @@ fn best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: 
                 println!("max depth: {:?}, states visited: {:?}, total time: {:?}", max_depth, max_states_visited, elapsed_time);
             }
             let solution = reconstruct_solution(&nodes, &selected_state);
-            if solution.is_none() {
-                println!("error in reconstructing solution")
+            match solution {
+                SearchResult::SolutionError => println!("error in reconstructing solution"),
+                _ => (),
             }
             return solution;
         }
@@ -147,22 +177,22 @@ fn best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: 
         let elapsed_time = start_time.elapsed();
         println!("max depth: {:?}, states visited: {:?}, total time: {:?}", max_depth, max_states_visited, elapsed_time);
     }
-    return None;
+    return SearchResult::Unsolvable;
 }
 
-pub fn uniform_cost_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, verbose: bool) -> Option<(Vec<Action>, f64)> {
-    return best_first_search(planning_problem, |path_cost, _| path_cost, verbose);
+pub fn uniform_cost_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, verbose: bool, time_budget: Option<u32>, space_budget: Option<u32>) -> SearchResult<Action> {
+    return best_first_search(planning_problem, |path_cost, _| path_cost, verbose, time_budget, space_budget);
 }
 
-pub fn astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
-    return best_first_search(planning_problem, |path_cost, state| path_cost + heuristic_function(state), verbose);
+pub fn astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool, time_budget: Option<u32>, space_budget: Option<u32>) -> SearchResult<Action> {
+    return best_first_search(planning_problem, |path_cost, state| path_cost + heuristic_function(state), verbose, time_budget, space_budget);
 }
 
-pub fn weighted_astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, weight: f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
+pub fn weighted_astar<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, weight: f64, verbose: bool, time_budget: Option<u32>, space_budget: Option<u32>) -> SearchResult<Action> {
     assert!(weight > 1.0);
-    return best_first_search(planning_problem, |path_cost, state| path_cost + weight * heuristic_function(state), verbose);
+    return best_first_search(planning_problem, |path_cost, state| path_cost + weight * heuristic_function(state), verbose, time_budget, space_budget);
 }
 
-pub fn greedy_best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool) -> Option<(Vec<Action>, f64)> {
-    return best_first_search(planning_problem, |_, state| heuristic_function(state), verbose);
+pub fn greedy_best_first_search<State: Hash + Eq + Clone, Action: Clone>(planning_problem: &impl PlanningProblem<State, Action>, heuristic_function: impl Fn(&State) -> f64, verbose: bool, time_budget: Option<u32>, space_budget: Option<u32>) -> SearchResult<Action> {
+    return best_first_search(planning_problem, |_, state| heuristic_function(state), verbose, time_budget, space_budget);
 }

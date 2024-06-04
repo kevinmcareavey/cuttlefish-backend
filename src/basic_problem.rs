@@ -2,7 +2,7 @@ use std::time::Instant;
 use itertools::{Itertools, izip};
 use serde::{Deserialize, Serialize};
 use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
-use crate::planner::{astar, PlanningProblem};
+use crate::planner::{astar, PlanningProblem, SearchResult};
 
 #[derive(Debug)]
 #[derive(Clone)]
@@ -403,24 +403,24 @@ pub fn run() {
 
     let start_time = Instant::now();
     // let solution = uniform_cost_search(&home_problem, true);
-    let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true);
+    let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), true, None, None);
     // let solution = weighted_astar(&home_problem, |state| home_problem.heuristic_function(state), 2.0, true);
     // let solution = greedy_best_first_search(&home_problem, |state| home_problem.heuristic_function(state), true);
     println!("total runtime: {:?}", Instant::now() - start_time);
 
-    if solution.is_some() {
-        let (plan, cost) = solution.unwrap();
-        for action in &plan {
-            print!("{:?}", action.battery);
-            for appliance_action in &action.appliances {
-                print!(" {:?}", appliance_action);
+    match solution {
+        SearchResult::Solution(plan, cost) => {
+            for action in &plan {
+                print!("{:?}", action.battery);
+                for appliance_action in &action.appliances {
+                    print!(" {:?}", appliance_action);
+                }
+                println!();
             }
-            println!();
-        }
-        let min_real_cost: f64 = home_problem.min_real_cost.iter().sum();
-        let real_cost = home_problem.real_cost(&plan);
-        println!("cost: {:?} + {:?} = {:?}", min_real_cost, cost, real_cost);
-    } else {
-        println!("no solution found");
+            let min_real_cost: f64 = home_problem.min_real_cost.iter().sum();
+            let real_cost = home_problem.real_cost(&plan);
+            println!("cost: {:?} + {:?} = {:?}", min_real_cost, cost, real_cost);
+        },
+        _ => println!("no solution found"),
     }
 }

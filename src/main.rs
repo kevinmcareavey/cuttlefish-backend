@@ -1,6 +1,6 @@
 use std::cmp::max;
 use std::{env, fs};
-use std::num::NonZeroU8;
+use std::num::{NonZeroU32, NonZeroU8};
 use std::ops::{Add, Sub};
 use std::thread::sleep;
 use std::time::Duration;
@@ -10,7 +10,7 @@ use rusqlite::{Connection, Result, RowIndex};
 use serde::{Deserialize, Serialize};
 use crate::advanced_problem::AdvancedHomeProblem;
 use crate::basic_problem::{ApplianceAction, BatteryAction, HomeProblem};
-use crate::planner::astar;
+use crate::planner::{astar, SearchResult};
 use threadpool::ThreadPool;
 
 mod data;
@@ -79,36 +79,51 @@ fn update_solution(db_path: &String, problem: Problem, solution_data: String) ->
     return Ok(());
 }
 
-fn solve(db_path: &String, problem: Problem) {
+fn solve(db_path: &String, problem: Problem, time_budget: u32, space_budget: u32) {
     let Ok(home_parameters) = serde_json::from_str(&problem.data) else { return };
     let home_problem = AdvancedHomeProblem::new(home_parameters);
-    let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), false);
-    if solution.is_some() {
-        println!("problem {:?} is solved", problem.id);
-        let (plan, _) = solution.unwrap();
-        let mut integer_plan = vec![];
-        for action in plan {
-            let mut appliance_actions = vec![];
-            for appliance_action in action.appliances {
-                appliance_actions.push(match appliance_action {
-                    ApplianceAction::ON => 1,
-                    ApplianceAction::OFF => 0,
+    let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), false, Some(time_budget), Some(space_budget));
+
+    match solution {
+        SearchResult::Solution(plan, _) => {
+            println!("problem {:?} is solved", problem.id);
+            let mut integer_plan = vec![];
+            for action in plan {
+                let mut appliance_actions = vec![];
+                for appliance_action in action.appliances {
+                    appliance_actions.push(match appliance_action {
+                        ApplianceAction::ON => 1,
+                        ApplianceAction::OFF => 0,
+                    });
+                }
+                integer_plan.push(Action {
+                    battery: match action.battery {
+                        BatteryAction::DISCHARGE => -1,
+                        BatteryAction::OFF => 0,
+                        BatteryAction::CHARGE => 1,
+                    },
+                    appliances: appliance_actions,
                 });
             }
-            integer_plan.push(Action {
-                battery: match action.battery {
-                    BatteryAction::DISCHARGE => -1,
-                    BatteryAction::OFF => 0,
-                    BatteryAction::CHARGE => 1,
-                },
-                appliances: appliance_actions,
-            });
-        }
-        let Ok(solution_data) = serde_json::to_string(&integer_plan) else { return };
-        let Ok(_) = update_solution(db_path, problem, solution_data) else { return };
-    } else {
-        println!("problem {:?} is unsolvable", problem.id);
-        let Ok(_) = update_solution(db_path, problem, "unsolvable".to_string()) else { return };
+            let Ok(solution_data) = serde_json::to_string(&integer_plan) else { return };
+            let Ok(_) = update_solution(db_path, problem, solution_data) else { return };
+        },
+        SearchResult::Unsolvable => {
+            println!("problem {:?} is unsolvable", problem.id);
+            let Ok(_) = update_solution(db_path, problem, "unsolvable".to_string()) else { return };
+        },
+        SearchResult::TimeBudgetExceeded => {
+            println!("problem {:?} exceeds time budget", problem.id);
+            let Ok(_) = update_solution(db_path, problem, "time budget exceeded".to_string()) else { return };
+        },
+        SearchResult::SpaceBudgetExceeded => {
+            println!("problem {:?} exceeds space budget", problem.id);
+            let Ok(_) = update_solution(db_path, problem, "space budget exceeded".to_string()) else { return };
+        },
+        SearchResult::SolutionError => {
+            println!("problem {:?} is solved but failed to extract solution", problem.id);
+            let Ok(_) = update_solution(db_path, problem, "solution parse error".to_string()) else { return };
+        },
     }
 }
 
@@ -116,17 +131,24 @@ fn solve(db_path: &String, problem: Problem) {
 struct Config {
     database: DatabaseConfig,
     pool: PoolConfig,
+    budget: BudgetConfig,
 }
 
 #[derive(Deserialize, Debug)]
 struct DatabaseConfig {
     path: String,
-    scan_seconds: u16,
+    scan_milliseconds: u16,
 }
 
 #[derive(Deserialize, Debug)]
 struct PoolConfig {
     max_threads: NonZeroU8,
+}
+
+#[derive(Deserialize, Debug)]
+struct BudgetConfig {
+    max_seconds: NonZeroU32,
+    max_states: NonZeroU32,
 }
 
 fn main() {
@@ -145,13 +167,15 @@ fn main() {
         if let Ok(problems) = retrieve_problems(&config.database.path, started_at) {
             for problem in problems {
                 let db_path = config.database.path.clone();
+                let time_budget = config.budget.max_seconds.get();
+                let space_budget = config.budget.max_states.get();
                 pool.execute(move || {
                     println!("adding problem {:?} to thread pool", problem.id);
-                    solve(&db_path, problem);
+                    solve(&db_path, problem, time_budget, space_budget);
                 });
             }
         }
 
-        sleep(Duration::from_secs(config.database.scan_seconds as u64));
+        sleep(Duration::from_millis(config.database.scan_milliseconds as u64));
     }
 }

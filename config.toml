@@ -1,6 +1,10 @@
 [database]
 path = "/path/to/cuttlefish.db"
-scan_seconds = 1
+scan_milliseconds = 1000
 
 [pool]
 max_threads = 4
+
+[budget]
+max_seconds = 600
+max_states = 8000000
