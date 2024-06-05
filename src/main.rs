@@ -52,10 +52,10 @@ fn retrieve_problems(db_path: &String, started_at: DateTime<Local>) -> Result<Ve
 
     let connection = Connection::open(db_path)?;
 
-    let retrieved_at = Local::now();
-    let timeout = max(started_at, retrieved_at - ChronoDuration::minutes(15));
-    let data = (&retrieved_at.to_rfc3339(), &timeout.to_rfc3339());
-    let mut statement = connection.prepare("UPDATE problems SET retrieved_at = ?1 WHERE retrieved_at IS NULL OR ( solution_data IS NULL AND retrieved_at < ?2 ) RETURNING problem_id, problem_data")?;
+    let queued_at = Local::now();
+    let timeout = max(started_at, queued_at - ChronoDuration::minutes(15));
+    let data = (&queued_at.to_rfc3339(), &timeout.to_rfc3339());
+    let mut statement = connection.prepare("UPDATE problems SET queued_at = ?1 WHERE queued_at IS NULL OR ( result_status IS NULL AND queued_at < ?2 ) RETURNING problem_id, problem_data")?;
     let mut rows = statement.query(data)?;
 
     while let Some(row) = rows.next()? {
@@ -68,12 +68,21 @@ fn retrieve_problems(db_path: &String, started_at: DateTime<Local>) -> Result<Ve
     return Ok(problems);
 }
 
-fn update_solution(db_path: &String, problem: Problem, solution_data: String) -> Result<()> {
+#[derive(Copy, Clone)]
+enum ResultStatus {
+    Solved = 1,
+    Unsolvable = 0,
+    TimeBudgetExceeded = -1,
+    SpaceBudgetExceeded = -2,
+    SolutionError = -3,
+}
+
+fn update_solution(db_path: &String, problem: Problem, result_status: ResultStatus, result_data: Option<String>) -> Result<()> {
     let connection = Connection::open(db_path)?;
-    let updated_at = Local::now().to_rfc3339();
-    let data = (&updated_at, &solution_data, &problem.id);
+    let result_at = Local::now().to_rfc3339();
+    let data = (&result_at, result_status as i8, &result_data, &problem.id);
     connection.execute(
-        "UPDATE problems SET updated_at = ?1, solution_data = ?2 WHERE problem_id = ?3",
+        "UPDATE problems SET result_at = ?1, result_status = ?2, result_data = ?3 WHERE problem_id = ?4",
         data,
     )?;
     return Ok(());
@@ -105,24 +114,24 @@ fn solve(db_path: &String, problem: Problem, time_budget: u32, space_budget: u32
                     appliances: appliance_actions,
                 });
             }
-            let Ok(solution_data) = serde_json::to_string(&integer_plan) else { return };
-            let Ok(_) = update_solution(db_path, problem, solution_data) else { return };
+            let Ok(result_data) = serde_json::to_string(&integer_plan) else { return };
+            let Ok(_) = update_solution(db_path, problem, ResultStatus::Solved, Some(result_data)) else { return };
         },
         SearchResult::Unsolvable => {
             println!("problem {:?} is unsolvable", problem.id);
-            let Ok(_) = update_solution(db_path, problem, "unsolvable".to_string()) else { return };
+            let Ok(_) = update_solution(db_path, problem, ResultStatus::Unsolvable, None) else { return };
         },
         SearchResult::TimeBudgetExceeded => {
             println!("problem {:?} exceeds time budget", problem.id);
-            let Ok(_) = update_solution(db_path, problem, "time budget exceeded".to_string()) else { return };
+            let Ok(_) = update_solution(db_path, problem, ResultStatus::TimeBudgetExceeded, None) else { return };
         },
         SearchResult::SpaceBudgetExceeded => {
             println!("problem {:?} exceeds space budget", problem.id);
-            let Ok(_) = update_solution(db_path, problem, "space budget exceeded".to_string()) else { return };
+            let Ok(_) = update_solution(db_path, problem, ResultStatus::SpaceBudgetExceeded, None) else { return };
         },
         SearchResult::SolutionError => {
             println!("problem {:?} is solved but failed to extract solution", problem.id);
-            let Ok(_) = update_solution(db_path, problem, "solution parse error".to_string()) else { return };
+            let Ok(_) = update_solution(db_path, problem, ResultStatus::SolutionError, None) else { return };
         },
     }
 }
