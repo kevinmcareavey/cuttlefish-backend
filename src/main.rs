@@ -13,7 +13,6 @@ use crate::basic_problem::{ApplianceAction, BatteryAction, HomeProblem};
 use crate::planner::{astar, SearchResult};
 use threadpool::ThreadPool;
 
-mod data;
 mod planner;
 mod basic_problem;
 mod extended_problem;
@@ -88,9 +87,9 @@ fn update_solution(db_path: &String, problem: Problem, result_status: ResultStat
     return Ok(());
 }
 
-fn solve(db_path: &String, problem: Problem, time_budget: u32, space_budget: u32) {
+fn solve(db_path: &String, problem: Problem, time_budget: u32, space_budget: u32, prices: Vec<PriceDatapoint>) {
     let Ok(home_parameters) = serde_json::from_str(&problem.data) else { return };
-    let home_problem = AdvancedHomeProblem::new(home_parameters);
+    let home_problem = AdvancedHomeProblem::new(home_parameters, prices);
     let solution = astar(&home_problem, |state| home_problem.heuristic_function(state), false, Some(time_budget), Some(space_budget));
 
     match solution {
@@ -141,6 +140,7 @@ struct Config {
     database: DatabaseConfig,
     pool: PoolConfig,
     budget: BudgetConfig,
+    prices: PriceConfig,
 }
 
 #[derive(Deserialize, Debug)]
@@ -160,6 +160,17 @@ struct BudgetConfig {
     max_states: NonZeroU32,
 }
 
+#[derive(Deserialize, Debug)]
+struct PriceConfig {
+    path: String,
+}
+
+#[derive(Deserialize, Debug, Copy, Clone)]
+struct PriceDatapoint {
+    import_price: f64,
+    export_price: f64,
+}
+
 fn main() {
     // basic_problem::run();
     // extended_problem::run();
@@ -168,6 +179,10 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let contents = fs::read_to_string(&args[1]).expect("Error reading config file");
     let config: Config = toml::from_str(&contents).expect("Error parsing config from TOML");
+
+    let prices_str = fs::read_to_string(&config.prices.path).expect("Error reading prices file");
+    let prices: Vec<PriceDatapoint> = serde_json::from_str(&prices_str).expect("Error parsing prices from JSON");
+    assert_eq!(prices.len(), 168);
 
     let started_at = Local::now();
     let pool = ThreadPool::new(config.pool.max_threads.get() as usize);
@@ -178,9 +193,10 @@ fn main() {
                 let db_path = config.database.path.clone();
                 let time_budget = config.budget.max_seconds.get();
                 let space_budget = config.budget.max_states.get();
+                let prices_clone = prices.clone();
                 pool.execute(move || {
                     println!("adding problem {:?} to thread pool", problem.id);
-                    solve(&db_path, problem, time_budget, space_budget);
+                    solve(&db_path, problem, time_budget, space_budget, prices_clone);
                 });
             }
         }

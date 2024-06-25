@@ -1,8 +1,9 @@
+use std::fs;
 use std::time::Instant;
 use itertools::{Itertools, izip};
 use serde::{Deserialize, Serialize};
-use crate::data::{EXPORT_PRICES, IMPORT_PRICES};
 use crate::planner::{astar, PlanningProblem, SearchResult};
+use crate::PriceDatapoint;
 
 #[derive(Debug)]
 #[derive(Clone)]
@@ -106,10 +107,11 @@ pub struct HomeProblem {
 }
 
 impl HomeProblem {
-    pub fn new(home_parameters: HomeParameters) -> Self {
+    pub fn new(home_parameters: HomeParameters, prices: Vec<PriceDatapoint>) -> Self {
         let horizon = usize::try_from(home_parameters.horizon).unwrap();
-        let import_prices = IMPORT_PRICES[0..horizon].to_vec();
-        let export_prices = EXPORT_PRICES[0..horizon].to_vec();
+        assert!(prices.len() >= horizon);
+        let import_prices: Vec<f64> = prices[0..horizon].iter().map(|datapoint| datapoint.import_price).collect();
+        let export_prices: Vec<f64> = prices[0..horizon].iter().map(|datapoint| datapoint.export_price).collect();
 
         let mut max_import_energy = 0.0;
         max_import_energy += &home_parameters.battery.rate;
@@ -360,7 +362,7 @@ impl PlanningProblem<HomeState, HomeAction> for HomeProblem {
     }
 }
 
-fn home_problem_toy(horizon: u32) -> HomeProblem {
+fn home_problem_toy(horizon: u32, prices: Vec<PriceDatapoint>) -> HomeProblem {
     return HomeProblem::new(
         HomeParameters {
             horizon,
@@ -376,11 +378,12 @@ fn home_problem_toy(horizon: u32) -> HomeProblem {
                 ApplianceParameters::new("dishwasher".to_string(), 2, 0.6, 1),
                 ApplianceParameters::new("vehicle".to_string(), 8, 3.75, 1),
             ],
-        }
+        },
+        prices
     );
 }
 
-fn home_problem_basic(timesteps_per_hour: u32) -> HomeProblem {
+fn home_problem_basic(timesteps_per_hour: u32, prices: Vec<PriceDatapoint>) -> HomeProblem {
     assert!(1 <= timesteps_per_hour && timesteps_per_hour <= 60 && 60 % timesteps_per_hour == 0);
     let timesteps_per_hour_f64 = timesteps_per_hour as f64;
     return HomeProblem::new(
@@ -393,13 +396,17 @@ fn home_problem_basic(timesteps_per_hour: u32) -> HomeProblem {
                 ApplianceParameters::new("dishwasher".to_string(), 1 * timesteps_per_hour, 1.2 / timesteps_per_hour_f64, 7),
                 ApplianceParameters::new("vehicle".to_string(), 8 * timesteps_per_hour, 5.0 / timesteps_per_hour_f64, 1),
             ],
-        }
+        },
+        prices
     )
 }
 
 pub fn run() {
-    let home_problem = home_problem_toy(9);  // states visited: 7597, total time: 26.172834ms, cost: -16.564 + 271.8064 = 255.2424
-    // let home_problem = home_problem_basic(1);  // states visited: 3618227, total time: 25.484389958s, cost: -2988.1500000000024 + 3296.974650000001 = 308.8246500000001
+    let prices_str = fs::read_to_string("/Users/km17304/Workspace/cuttlefish/prices20191111.json").expect("Error reading prices file");
+    let prices: Vec<PriceDatapoint> = serde_json::from_str(&prices_str).expect("Error parsing prices from JSON");
+
+    let home_problem = home_problem_toy(9, prices);  // states visited: 7597, total time: 26.172834ms, cost: -16.564 + 271.8064 = 255.2424
+    // let home_problem = home_problem_basic(1, prices);  // states visited: 3618227, total time: 25.484389958s, cost: -2988.1500000000024 + 3296.974650000001 = 308.8246500000001
 
     let start_time = Instant::now();
     // let solution = uniform_cost_search(&home_problem, true);

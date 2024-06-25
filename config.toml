@@ -8,3 +8,6 @@ max_threads = 4
 [budget]
 max_seconds = 600
 max_states = 8000000
+
+[prices]
+path = "/path/to/prices.json"
